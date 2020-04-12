@@ -25,7 +25,7 @@ def get_default_config():
     config = {
         "seed": 12,
         "data_path": "/tmp/cifar10",
-        "output_path": "/tmp/cifar10-output",
+        "output_path": "/tmp/output-fixmatch-cifar10",
         "model": "WRN-28-2",
         "momentum": 0.9,
         "weight_decay": 0.0005,
@@ -34,7 +34,7 @@ def get_default_config():
         "num_epochs": 1024,
         "epoch_length": 2 ** 16 // batch_size,  # epoch_length * num_epochs == 2 ** 20
         "learning_rate": 0.03,
-        "validate_every": 2,
+        "validate_every": 1,
 
         "with_amp_level": None,  # if "O1" or "O2" -> train with apex/amp, otherwise fp32
 
@@ -63,10 +63,13 @@ def run(trainer, output_path, config):
     num_workers = config["num_workers"]
 
     # Setup dataflow
-    supervised_train_dataset = utils.get_supervised_trainset(
-        config["data_path"],
-        config["num_train_samples_per_class"]
-    )
+    if config["num_train_samples_per_class"] == 25:
+        supervised_train_dataset = utils.get_supervised_trainset_0_250(config["data_path"])
+    else:
+        supervised_train_dataset = utils.get_supervised_trainset(
+            config["data_path"],
+            config["num_train_samples_per_class"]
+        )
 
     supervised_train_loader = utils.get_supervised_train_loader(
         supervised_train_dataset,
@@ -84,7 +87,7 @@ def run(trainer, output_path, config):
 
     cta = utils.get_default_cta()
 
-    cta_probe_train_loader = utils.get_cta_probe_train_loader(
+    cta_probe_loader = utils.get_cta_probe_loader(
         supervised_train_dataset,
         cta=cta,
         batch_size=batch_size,
@@ -103,7 +106,7 @@ def run(trainer, output_path, config):
     model = WideResNet(num_classes=10)
     model = model.to(device)
 
-    # Setup
+    # Setup EMA model
     ema_model = WideResNet(num_classes=10).to(device)
     ema_model.load_state_dict(model.state_dict())
     for param in ema_model.parameters():
@@ -136,14 +139,17 @@ def run(trainer, output_path, config):
     # Setup training/validation loops
     supervised_train_loader_iter = utils.cycle(supervised_train_loader)
     unsupervised_train_loader_iter = utils.cycle(unsupervised_train_loader)
-    cta_probe_train_loader_iter = utils.cycle(cta_probe_train_loader)
+    cta_probe_loader_iter = utils.cycle(cta_probe_loader)
 
     trainer.setup(
-        config,
-        model, ema_model, optimizer,
-        sup_criterion, unsup_criterion,
-        supervised_train_loader_iter, unsupervised_train_loader_iter, cta_probe_train_loader_iter,
-        cta,
+        config=config,
+        model=model, ema_model=ema_model, optimizer=optimizer,
+        sup_criterion=sup_criterion, unsup_criterion=unsup_criterion,
+        supervised_train_loader_iter=supervised_train_loader_iter, 
+        unsupervised_train_loader_iter=unsupervised_train_loader_iter, 
+        cta_probe_loader_iter=cta_probe_loader_iter,
+        cta=cta,
+        device=device
     )
 
     to_save = {
@@ -159,14 +165,14 @@ def run(trainer, output_path, config):
         to_save=to_save,
         save_every_iters=config["checkpoint_every"],
         output_path=output_path,
-        output_names=["total_loss", "sup_loss", "unsup_loss", "non_zero_unsup_loss_density"],
+        output_names=trainer.output_names,
         lr_scheduler=lr_scheduler,
         with_pbar_on_iters=config["display_iters"],
-        log_every_iters=1
+        log_every_iters=10
     )
 
     @trainer.on(Events.ITERATION_COMPLETED)
-    def update_ema_model(_):
+    def update_ema_model():
         ema_decay = config["ema_decay"]
         for ema_param, param in zip(ema_model.parameters(), model.parameters()):
             ema_param.data.mul_(ema_decay).add_(1 - ema_decay, param.data)
@@ -187,20 +193,23 @@ def run(trainer, output_path, config):
         prepare_batch=utils.sup_prepare_batch, device=device, non_blocking=True
     )
 
-    def log_results(_):
+    def log_results(epoch, max_epochs, metrics):
         def to_list_str(v):
             if isinstance(v, torch.Tensor):
                 return " ".join(["%.2f" % i for i in v.tolist()])
             return "%.2f" % v
 
         msg = "\n".join(["{:16s}: {}".format(k, to_list_str(v)) for k, v in metrics.items()])
-        print("{}\n{}".format(trainer.state.epoch, msg))
+        print("\nEpoch {}/{}\n{}".format(epoch, max_epochs, msg))
+        print(utils.stats(cta))
 
-    @trainer.on(Events.EPOCH_COMPLETED(every=config["validate_every"]))
-    def run_evaluation(_):
+    def run_evaluation():
         evaluator.run(test_loader)
         ema_evaluator.run(test_loader)
-        log_results(ema_evaluator.state.metrics)
+        log_results(trainer.state.epoch, trainer.state.max_epochs, ema_evaluator.state.metrics)
+
+    ev = Events.EPOCH_COMPLETED(every=config["validate_every"]) | Events.STARTED | Events.COMPLETED
+    trainer.add_event_handler(ev, run_evaluation)
 
     # setup TB logging
     tb_logger = common.setup_tb_logging(
@@ -255,7 +264,7 @@ def main(trainer, config):
                 value = eval(value)
             config[key] = value
 
-    print("Train {} on CIFAR10".format(config["network_name"]))
+    print("Train {} on CIFAR10".format(config["model"]))
     print("- PyTorch version: {}".format(torch.__version__))
     print("- Ignite version: {}".format(ignite.__version__))
     print("- CUDA version: {}".format(torch.version.cuda))
@@ -287,8 +296,8 @@ class BaseTrainer(Engine):
     def __init__(self):
         super(BaseTrainer, self).__init__(self.train_step)
 
-    def setup(self, *args, **kwargs):
-        for k, v in locals().items():
+    def setup(self, **kwargs):
+        for k, v in kwargs.items():
             if k != 'self' and not k.startswith('_'):
                 setattr(self, k, v)
 
