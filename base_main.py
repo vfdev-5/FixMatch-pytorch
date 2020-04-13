@@ -112,9 +112,6 @@ def run(trainer, output_path, config):
     for param in ema_model.parameters():
         param.detach_()
 
-    if torch.cuda.device_count() > 0:
-        model = nn.parallel.DataParallel(model)
-
     optimizer = optim.SGD(
         model.parameters(),
         lr=config["learning_rate"],
@@ -127,6 +124,9 @@ def run(trainer, output_path, config):
         assert config["with_amp_level"] in ("O1", "O2")
         from apex import amp
         model, optimizer = amp.initialize(model, optimizer, opt_level=config["with_amp_level"])
+
+    if torch.cuda.device_count() > 0:
+        model = nn.parallel.DataParallel(model)
 
     sup_criterion = nn.CrossEntropyLoss().to(device)
     unsup_criterion = nn.CrossEntropyLoss(reduction='none').to(device)
