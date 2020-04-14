@@ -50,14 +50,23 @@ def get_default_config():
         # Logging:
         "display_iters": True,
         "checkpoint_every": 200,
+        "debug": True
     }
     return config
+
+
+def to_list_str(v):
+    if isinstance(v, torch.Tensor):
+        return " ".join(["%.2f" % i for i in v.tolist()])
+    return "%.2f" % v
 
 
 def run(trainer, output_path, config):
     assert isinstance(trainer, BaseTrainer)
     device = "cuda"
     torch.manual_seed(config["seed"])
+
+    debug = config["debug"]
 
     batch_size = config["batch_size"]
     num_workers = config["num_workers"]
@@ -168,14 +177,29 @@ def run(trainer, output_path, config):
         output_names=trainer.output_names,
         lr_scheduler=lr_scheduler,
         with_pbar_on_iters=config["display_iters"],
-        log_every_iters=10
+        log_every_iters=2
     )
 
-    @trainer.on(Events.ITERATION_COMPLETED)
-    def update_ema_model():
-        ema_decay = config["ema_decay"]
+    @trainer.on(Events.ITERATION_COMPLETED, config["ema_decay"])
+    def update_ema_model(ema_decay):
+        # EMA on parametes
         for ema_param, param in zip(ema_model.parameters(), model.parameters()):
             ema_param.data.mul_(ema_decay).add_(param.data, alpha=1.0 - ema_decay)
+        # Copy buffers
+        for ema_buf, buf in zip(ema_model.buffers(), model.buffers()):
+            ema_buf.data = buf.data
+
+    if debug:
+        @trainer.on(Events.STARTED | Events.ITERATION_COMPLETED(every=100))
+        def log_weights_norms(_):
+            wn = []
+            ema_wn = []
+            for ema_param, param in zip(ema_model.parameters(), model.parameters()):
+                wn.append(torch.mean(param.data))
+                ema_wn.append(torch.mean(ema_param.data))
+
+            print("\nRaw model: {}".format(to_list_str(torch.tensor(wn[:10] + wn[-10:]))))
+            print("EMA model: {}\n".format(to_list_str(torch.tensor(ema_wn[:10] + ema_wn[-10:]))))
 
     # Setup validation
     metrics = {
@@ -193,20 +217,21 @@ def run(trainer, output_path, config):
         prepare_batch=utils.sup_prepare_batch, device=device, non_blocking=True
     )
 
-    def log_results(epoch, max_epochs, metrics):
-        def to_list_str(v):
-            if isinstance(v, torch.Tensor):
-                return " ".join(["%.2f" % i for i in v.tolist()])
-            return "%.2f" % v
-
-        msg = "\n".join(["{:16s}: {}".format(k, to_list_str(v)) for k, v in metrics.items()])
-        print("\nEpoch {}/{}\n{}".format(epoch, max_epochs, msg))
+    def log_results(epoch, max_epochs, metrics, ema_metrics):
+        msg1 = "\n".join(["{:16s}: {}".format(k, to_list_str(v)) for k, v in metrics.items()])
+        msg2 = "\n".join(["{:16s}: {}".format(k, to_list_str(v)) for k, v in ema_metrics.items()])
+        print("\nEpoch {}/{}\nRaw:\n{}\nEMA:\n{}\n".format(epoch, max_epochs, msg1, msg2))
         print(utils.stats(cta))
 
     def run_evaluation():
         evaluator.run(test_loader)
         ema_evaluator.run(test_loader)
-        log_results(trainer.state.epoch, trainer.state.max_epochs, ema_evaluator.state.metrics)
+        log_results(
+            trainer.state.epoch, 
+            trainer.state.max_epochs,
+            evaluator.state.metrics,
+            ema_evaluator.state.metrics
+        )
 
     ev = Events.EPOCH_COMPLETED(every=config["validate_every"]) | Events.STARTED | Events.COMPLETED
     trainer.add_event_handler(ev, run_evaluation)

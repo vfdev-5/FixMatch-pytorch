@@ -73,9 +73,9 @@ class FixMatchTrainer(BaseTrainer):
     def update_cta_rates(self, _):
         cta_probe_batch = next(self.cta_probe_loader_iter)
         x, y = utils.sup_prepare_batch(cta_probe_batch, self.device, non_blocking=True)
-        self.model.eval()
+        self.ema_model.eval()
         with torch.no_grad():
-            y_pred = self.model(x)
+            y_pred = self.ema_model(x)
             y_probas = torch.softmax(y_pred, dim=1)  # (N, C)
 
             for y_proba, t, policy_str in zip(y_probas, y, cta_probe_batch['policy']):
