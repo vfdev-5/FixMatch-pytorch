@@ -175,7 +175,7 @@ def run(trainer, output_path, config):
     def update_ema_model():
         ema_decay = config["ema_decay"]
         for ema_param, param in zip(ema_model.parameters(), model.parameters()):
-            ema_param.data.mul_(ema_decay).add_(1 - ema_decay, param.data)
+            ema_param.data.mul_(ema_decay).add_(param.data, alpha=1.0 - ema_decay)
 
     # Setup validation
     metrics = {

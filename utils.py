@@ -110,7 +110,7 @@ def get_supervised_trainset_0_250(root, download=False):
 def get_supervised_train_loader(supervised_train_dataset, transforms=weak_transforms, **dataloader_kwargs):
 
     dataloader_kwargs['pin_memory'] = True
-    dataloader_kwargs['drop_last'] = False
+    dataloader_kwargs['drop_last'] = True
     dataloader_kwargs['shuffle'] = True
 
     supervised_train_loader = DataLoader(
@@ -226,3 +226,16 @@ def stats(cta):
     return '\n'.join('%-16s    %s' % (k, ' / '.join(' '.join('%.2f' % x for x in cta.rate_to_p(rate))
                                                     for rate in cta.rates[k]))
                      for k in sorted(OPS.keys()))
+
+
+def interleave(x, batch, inverse=False):
+    # def interleave(x, batch):
+    #     s = x.get_shape().as_list()
+    #     return tf.reshape(tf.transpose(tf.reshape(x, [-1, batch] + s[1:]), [1, 0] + list(range(2, 1+len(s)))), [-1] + s[1:])
+    shape = x.shape
+    axes = [batch, -1] if inverse else [-1, batch]
+    return x.reshape(*axes, *shape[1:]).transpose(0, 1).reshape(-1, *shape[1:])
+
+
+def deinterleave(x, batch):
+    return interleave(x, batch, inverse=True)

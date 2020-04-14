@@ -25,8 +25,10 @@ class FixMatchTrainer(BaseTrainer):
         strong_x = convert_tensor(unsup_batch["strong_aug"], self.device, non_blocking=True)
 
         # according to TF code: single forward pass on concat data: [x, weak_x, strong_x]
-        x_cat = torch.cat([x, weak_x, strong_x], dim=0)
+        le = 2 * self.config["mu_ratio"] + 1
+        x_cat = utils.interleave(torch.cat([x, weak_x, strong_x], dim=0), le)
         y_pred_cat = self.model(x_cat)
+        y_pred_cat = utils.deinterleave(y_pred_cat, le)
 
         idx1 = len(x)
         idx2 = idx1 + len(weak_x)

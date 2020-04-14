@@ -54,6 +54,8 @@ class WideResNet(nn.Module):
         self.bn = nn.BatchNorm2d(filters * 4, momentum=0.001)
         self.reduce = nn.AdaptiveAvgPool2d(1)
         self.fc = nn.Linear(filters * 4, num_classes)
+                
+        self.init_weights()
 
     def forward(self, x):
         x = self.conv(x)
@@ -63,3 +65,13 @@ class WideResNet(nn.Module):
         x = self.reduce(x)
         x = torch.flatten(x, 1)
         return self.fc(x)
+
+    def init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.normal_(
+                    m.weight,
+                    std=torch.tensor(0.5 * m.kernel_size[0] * m.kernel_size[0] * m.out_channels).rsqrt()
+                )
+            elif isinstance(m, nn.Linear):
+                nn.init.xavier_normal_(m.weight)
