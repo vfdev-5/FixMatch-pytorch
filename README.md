@@ -1,6 +1,6 @@
 # FixMatch experiments in PyTorch
 
-Experiments with "FixMatch" method on Cifar10 dataset.
+Experiments with "FixMatch" on Cifar10 dataset.
 
 Based on ["FixMatch: Simplifying Semi-Supervised Learning withConsistency and Confidence"](https://arxiv.org/abs/2001.07685)
 
@@ -12,14 +12,15 @@ pip install --upgrade --pre pytorch-ignite
 
 ## Training
 
-### Download dataset (Optional)
 ```bash
-python -c "import torchvision as t; t.datasets.cifar.CIFAR10('/path/to/cifar10', download=True)"
+python -u main_fixmatch.py
+# or python -u main_fixmatch.py --params "data_path=/path/to/cifar10"
 ```
 
-```bash
-python -u main_fixmatch.py --params "data_path=/path/to/cifar10"
-```
+## TODO
 
-## Training with MLflow
-
+* [ ] Resume training from existing checkpoint:
+    * [x] save/load CTA
+    * [x] save ema model
+* [ ] Logging to online platform: NeptuneML or Trains or W&B
+* [ ] DDP: Synchronize CTA across processes

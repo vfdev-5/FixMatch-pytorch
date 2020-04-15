@@ -1,10 +1,12 @@
 from functools import partial
 import json
 import random
+from collections import OrderedDict
 
 import numpy as np
 
 import torch
+import torch.nn as nn
 
 from torch.utils.data import Subset, Dataset, DataLoader
 from torchvision import transforms as T
@@ -57,7 +59,7 @@ class TransformedDataset(Dataset):
         return len(self.dataset)
 
 
-def get_supervised_trainset(root, num_train_samples_per_class=25, download=False):
+def get_supervised_trainset(root, num_train_samples_per_class=25, download=True):
     num_classes = 10
     full_train_dataset = CIFAR10(root, train=True, download=download)
 
@@ -111,7 +113,7 @@ def get_supervised_train_loader(supervised_train_dataset, transforms=weak_transf
 
     dataloader_kwargs['pin_memory'] = True
     dataloader_kwargs['drop_last'] = True
-    dataloader_kwargs['shuffle'] = True
+    dataloader_kwargs['shuffle'] = dataloader_kwargs.get("sampler", None) is None
 
     supervised_train_loader = DataLoader(
         TransformedDataset(
@@ -125,7 +127,7 @@ def get_supervised_train_loader(supervised_train_dataset, transforms=weak_transf
 
 def get_test_loader(root, transforms=test_transforms, **dataloader_kwargs):
 
-    full_test_dataset = CIFAR10(root, train=False, download=True)
+    full_test_dataset = CIFAR10(root, train=False, download=False)
 
     dataloader_kwargs['pin_memory'] = True
     dataloader_kwargs['drop_last'] = False
@@ -141,8 +143,19 @@ def get_test_loader(root, transforms=test_transforms, **dataloader_kwargs):
     return test_loader
 
 
+class StorableCTAugment(CTAugment):    
+
+    def load_state_dict(self, state):
+        for k in ["decay", "depth", "th", "rates"]:
+            assert k in state, "{} not in {}".format(k, state.keys())
+            setattr(self, k, state[k])
+
+    def state_dict(self):
+        return OrderedDict([(k, getattr(self, k)) for k in ["decay", "depth", "th", "rates"]])
+
+
 def get_default_cta():
-    return CTAugment()
+    return StorableCTAugment()
 
 
 def cta_apply(pil_img, ops):
@@ -178,7 +191,7 @@ def get_cta_probe_loader(supervised_train_dataset, cta, **dataloader_kwargs):
 
     dataloader_kwargs['pin_memory'] = True
     dataloader_kwargs['drop_last'] = False
-    dataloader_kwargs['shuffle'] = True
+    dataloader_kwargs['shuffle'] = dataloader_kwargs.get("sampler", None) is None
 
     cta_probe_loader = DataLoader(
         TransformedDataset(
@@ -191,17 +204,16 @@ def get_cta_probe_loader(supervised_train_dataset, cta, **dataloader_kwargs):
     return cta_probe_loader
 
 
-def get_unsupervised_train_loader(root, transforms_weak, transforms_strong, **dataloader_kwargs):
-
-    full_train_dataset = CIFAR10(root, train=True, download=False)
+def get_unsupervised_train_loader(raw_dataset, transforms_weak, transforms_strong, **dataloader_kwargs):
+    
     unsupervised_train_dataset = TransformedDataset(
-        full_train_dataset,
+        raw_dataset,
         transforms=lambda dp: {"image": transforms_weak(dp[0]), "strong_aug": transforms_strong(dp[0])}
     )
 
     dataloader_kwargs['pin_memory'] = True
     dataloader_kwargs['drop_last'] = True
-    dataloader_kwargs['shuffle'] = True
+    dataloader_kwargs['shuffle'] = dataloader_kwargs.get("sampler", None) is None
 
     unsupervised_train_loader = DataLoader(
         unsupervised_train_dataset,
@@ -239,3 +251,14 @@ def interleave(x, batch, inverse=False):
 
 def deinterleave(x, batch):
     return interleave(x, batch, inverse=True)
+
+
+def setup_ema(ema_model, ref_model):
+    ema_model.load_state_dict(ref_model.state_dict())
+    for param in ema_model.parameters():
+        param.detach_()
+    # set EMA model's BN buffers as base model BN buffers:
+    for m1, m2 in zip(ref_model.modules(), ema_model.modules()):
+        if isinstance(m1, nn.BatchNorm2d) and isinstance(m2, nn.BatchNorm2d):
+            m2.running_mean = m1.running_mean
+            m2.running_var = m1.running_var

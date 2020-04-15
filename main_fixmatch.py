@@ -2,7 +2,6 @@
 import torch
 
 from ignite.engine import Events
-from ignite.utils import convert_tensor
 
 import utils
 from base_main import main, BaseTrainer, get_default_config
@@ -12,17 +11,12 @@ class FixMatchTrainer(BaseTrainer):
 
     output_names = ["total_loss", "sup_loss", "unsup_loss", "mask"]
 
-    def train_step(self, *args, **kwargs):
+    def train_step(self, engine, batch):
         self.model.train()
         self.optimizer.zero_grad()
 
-        # supervised data:
-        sup_batch = next(self.supervised_train_loader_iter)
-        x, y = utils.sup_prepare_batch(sup_batch, self.device, non_blocking=True)
-        # unsupervised data:
-        unsup_batch = next(self.unsupervised_train_loader_iter)
-        weak_x = convert_tensor(unsup_batch["image"], self.device, non_blocking=True)
-        strong_x = convert_tensor(unsup_batch["strong_aug"], self.device, non_blocking=True)
+        x, y = batch["sup_batch"]
+        weak_x, strong_x = batch["unsup_batch"]
 
         # according to TF code: single forward pass on concat data: [x, weak_x, strong_x]
         le = 2 * self.config["mu_ratio"] + 1
@@ -70,15 +64,14 @@ class FixMatchTrainer(BaseTrainer):
         self.lambda_u = self.config["lambda_u"]
         self.add_event_handler(Events.ITERATION_COMPLETED, self.update_cta_rates)
 
-    def update_cta_rates(self, _):
-        cta_probe_batch = next(self.cta_probe_loader_iter)
-        x, y = utils.sup_prepare_batch(cta_probe_batch, self.device, non_blocking=True)
+    def update_cta_rates(self):
+        x, y, policies = self.state.batch["cta_probe_batch"]
         self.ema_model.eval()
         with torch.no_grad():
             y_pred = self.ema_model(x)
             y_probas = torch.softmax(y_pred, dim=1)  # (N, C)
 
-            for y_proba, t, policy_str in zip(y_probas, y, cta_probe_batch['policy']):
+            for y_proba, t, policy_str in zip(y_probas, y, policies):
                 policy = utils.deserialize(policy_str)
                 error = y_proba
                 error[t] -= 1
