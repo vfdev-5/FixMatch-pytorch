@@ -4,7 +4,7 @@ import torch
 from ignite.engine import Events
 
 import utils
-from base_main import main, BaseTrainer, get_default_config
+from base_train import main, BaseTrainer, get_default_config
 
 
 class FixMatchTrainer(BaseTrainer):
@@ -52,10 +52,10 @@ class FixMatchTrainer(BaseTrainer):
         self.optimizer.step()
 
         return {
-            "total_loss": total_loss,
-            "sup_loss": sup_loss,
-            "unsup_loss": unsup_loss,
-            "mask": unsup_loss_mask.mean()
+            "total_loss": total_loss.item(),
+            "sup_loss": sup_loss.item(),
+            "unsup_loss": unsup_loss.item(),
+            "mask": unsup_loss_mask.mean().item()
         }
 
     def setup(self, **kwargs):
@@ -71,8 +71,8 @@ class FixMatchTrainer(BaseTrainer):
             y_pred = self.ema_model(x)
             y_probas = torch.softmax(y_pred, dim=1)  # (N, C)
 
-            for y_proba, t, policy_str in zip(y_probas, y, policies):
-                policy = utils.deserialize(policy_str)
+            # for y_proba, t, policy_str in zip(y_probas, y, policies):
+            for y_proba, t, policy in zip(y_probas, y, policies):                
                 error = y_proba
                 error[t] -= 1
                 error = torch.abs(error).sum()

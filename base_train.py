@@ -7,9 +7,8 @@ import hashlib
 import torch
 import torch.nn as nn
 import torch.optim as optim
+
 import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data.distributed import DistributedSampler
 
 import ignite
 from ignite.engine import Events, Engine, create_supervised_evaluator
@@ -21,12 +20,7 @@ from ignite.contrib.engines import common
 from ignite.contrib.handlers import ProgressBar
 from ignite.contrib.handlers.time_profilers import BasicTimeProfiler
 
-
-from wrn import WideResNet
 import utils
-
-
-device = "cuda"
 
 
 def run(trainer, config):
@@ -45,7 +39,7 @@ def run(trainer, config):
     cta = utils.get_default_cta()
 
     supervised_train_loader_iter, unsupervised_train_loader_iter, cta_probe_loader_iter = \
-        get_dataflow_iters(config, cta, distributed)
+        utils.get_dataflow_iters(config, cta, distributed)
 
     test_loader = utils.get_test_loader(
         config["data_path"],
@@ -54,10 +48,10 @@ def run(trainer, config):
         num_workers=config["num_workers"]
     )
 
-    model, ema_model, optimizer = get_models_optimizer(config, distributed)
+    model, ema_model, optimizer = utils.get_models_optimizer(config, distributed)
 
-    sup_criterion = nn.CrossEntropyLoss().to(device)
-    unsup_criterion = nn.CrossEntropyLoss(reduction='none').to(device)
+    sup_criterion = nn.CrossEntropyLoss().to(utils.device)
+    unsup_criterion = nn.CrossEntropyLoss(reduction='none').to(utils.device)
 
     num_epochs = config["num_epochs"]
     epoch_length = config["epoch_length"]
@@ -70,7 +64,7 @@ def run(trainer, config):
         model=model, ema_model=ema_model, optimizer=optimizer,
         sup_criterion=sup_criterion, unsup_criterion=unsup_criterion,
         cta=cta,
-        device=device
+        device=utils.device
     )
 
     # Setup handler to prepare data batches
@@ -80,16 +74,17 @@ def run(trainer, config):
         unsup_batch = next(unsupervised_train_loader_iter)
         cta_probe_batch = next(cta_probe_loader_iter)        
         e.state.batch = {
-            "sup_batch": utils.sup_prepare_batch(sup_batch, device, non_blocking=True),
+            "sup_batch": utils.sup_prepare_batch(sup_batch, utils.device, non_blocking=True),
             "unsup_batch": (
-                convert_tensor(unsup_batch["image"], device, non_blocking=True),
-                convert_tensor(unsup_batch["strong_aug"], device, non_blocking=True)
+                convert_tensor(unsup_batch["image"], utils.device, non_blocking=True),
+                convert_tensor(unsup_batch["strong_aug"], utils.device, non_blocking=True)
             ),
             "cta_probe_batch": (
-                *utils.sup_prepare_batch(cta_probe_batch, device, non_blocking=True),
-                cta_probe_batch['policy']
+                *utils.sup_prepare_batch(cta_probe_batch, utils.device, non_blocking=True),
+                [utils.deserialize(p) for p in cta_probe_batch['policy']]
             )
         }
+        sup_batch = unsup_batch = cta_probe_batch = None
 
     # Setup other common handlers for the trainer
     to_save = {
@@ -107,28 +102,14 @@ def run(trainer, config):
 
     common.setup_common_training_handlers(
         trainer,
-        # to_save=None if debug else to_save,
+        to_save=None if debug else to_save,
         save_every_iters=config["checkpoint_every"],
-        # output_path=config["output_path"],
+        output_path=config["output_path"],
         output_names=trainer.output_names,
         lr_scheduler=lr_scheduler,
         with_pbar_on_iters=config["display_iters"],
         log_every_iters=2
     )
-
-    # Temporary fix until: https://github.com/pytorch/ignite/pull/923
-    if rank == 0:
-        from ignite.handlers import ModelCheckpoint
-        checkpoint_handler = ModelCheckpoint(
-            dirname=config["output_path"], 
-            filename_prefix="training", 
-            require_empty=False
-        )
-        trainer.add_event_handler(
-            Events.ITERATION_COMPLETED(every=config["checkpoint_every"]), 
-            checkpoint_handler, 
-            to_save
-        )
 
     # Setup handler to update EMA model
     @trainer.on(Events.ITERATION_COMPLETED, config["ema_decay"])
@@ -149,8 +130,8 @@ def run(trainer, config):
                 ema_wn.append(torch.mean(ema_param.data))
 
             print("\n\nWeights norms")
-            print("\n- Raw model: {}".format(to_list_str(torch.tensor(wn[:10] + wn[-10:]))))
-            print("- EMA model: {}\n".format(to_list_str(torch.tensor(ema_wn[:10] + ema_wn[-10:]))))
+            print("\n- Raw model: {}".format(utils.to_list_str(torch.tensor(wn[:10] + wn[-10:]))))
+            print("- EMA model: {}\n".format(utils.to_list_str(torch.tensor(ema_wn[:10] + ema_wn[-10:]))))
 
         profiler = BasicTimeProfiler()
         profiler.attach(trainer)
@@ -169,16 +150,16 @@ def run(trainer, config):
 
     evaluator = create_supervised_evaluator(
         model, metrics,
-        prepare_batch=utils.sup_prepare_batch, device=device, non_blocking=True
+        prepare_batch=utils.sup_prepare_batch, device=utils.device, non_blocking=True
     )
     ema_evaluator = create_supervised_evaluator(
         ema_model, metrics,
-        prepare_batch=utils.sup_prepare_batch, device=device, non_blocking=True
+        prepare_batch=utils.sup_prepare_batch, device=utils.device, non_blocking=True
     )
 
     def log_results(epoch, max_epochs, metrics, ema_metrics):
-        msg1 = "\n".join(["{:16s}: {}".format(k, to_list_str(v)) for k, v in metrics.items()])
-        msg2 = "\n".join(["{:16s}: {}".format(k, to_list_str(v)) for k, v in ema_metrics.items()])
+        msg1 = "\n".join(["\t{:16s}: {}".format(k, utils.to_list_str(v)) for k, v in metrics.items()])
+        msg2 = "\n".join(["\t{:16s}: {}".format(k, utils.to_list_str(v)) for k, v in ema_metrics.items()])
         print("\nEpoch {}/{}\nRaw:\n{}\nEMA:\n{}\n".format(epoch, max_epochs, msg1, msg2))
         print(utils.stats(cta))
 
@@ -208,6 +189,7 @@ def run(trainer, config):
 
         if config["display_iters"]:
             ProgressBar(persist=False, desc="Test evaluation").attach(evaluator)
+            ProgressBar(persist=False, desc="Test EMA evaluation").attach(ema_evaluator)
 
     data = list(range(epoch_length))
 
@@ -365,95 +347,3 @@ def get_default_config():
         "debug": False
     }
     return config
-
-
-def to_list_str(v):
-    if isinstance(v, torch.Tensor):
-        return " ".join(["%.2f" % i for i in v.tolist()])
-    return "%.2f" % v
-
-
-def get_dataflow_iters(config, cta, distributed=False):
-
-    # Rescale batch_size and num_workers
-    ngpus_per_node = torch.cuda.device_count()
-    ngpus = dist.get_world_size() if distributed else 1
-    batch_size = config["batch_size"] // ngpus
-    num_workers = int((config["num_workers"] + ngpus_per_node - 1) / ngpus_per_node)
-    num_workers //= 3  # 3 dataloaders
-
-    # Setup dataflow
-    if config["num_train_samples_per_class"] == 25:
-        supervised_train_dataset = utils.get_supervised_trainset_0_250(config["data_path"])
-    else:
-        supervised_train_dataset = utils.get_supervised_trainset(
-            config["data_path"],
-            config["num_train_samples_per_class"]
-        )
-
-    supervised_train_loader = utils.get_supervised_train_loader(
-        supervised_train_dataset,
-        transforms=utils.weak_transforms,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        sampler=DistributedSampler(supervised_train_dataset) if distributed else None
-    )
-
-    cta_probe_loader = utils.get_cta_probe_loader(
-        supervised_train_dataset,
-        cta=cta,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        sampler=DistributedSampler(supervised_train_dataset) if distributed else None
-    )
-    
-    full_train_dataset = utils.CIFAR10(config["data_path"], train=True)
-    unsupervised_train_loader = utils.get_unsupervised_train_loader(
-        full_train_dataset,
-        transforms_weak=utils.weak_transforms,
-        transforms_strong=partial(utils.cta_image_transforms, cta=cta),
-        batch_size=batch_size * config["mu_ratio"],
-        num_workers=num_workers,
-        sampler=DistributedSampler(full_train_dataset) if distributed else None
-    )
-
-    # Setup training/validation loops
-    supervised_train_loader_iter = utils.cycle(supervised_train_loader)
-    unsupervised_train_loader_iter = utils.cycle(unsupervised_train_loader)
-    cta_probe_loader_iter = utils.cycle(cta_probe_loader)
-
-    return supervised_train_loader_iter, unsupervised_train_loader_iter, cta_probe_loader_iter
-
-
-def get_models_optimizer(config, distributed=False):
-    
-    # Setup model, optimizer
-    model = WideResNet(num_classes=10)
-    model = model.to(device)
-
-    # Setup EMA model
-    ema_model = WideResNet(num_classes=10).to(device)
-    utils.setup_ema(ema_model, model)
-
-    optimizer = optim.SGD(
-        model.parameters(),
-        lr=config["learning_rate"],
-        momentum=config["momentum"],
-        weight_decay=config["weight_decay"],
-        nesterov=True,
-    )
-
-    if config["with_amp_level"] is not None:
-        assert config["with_amp_level"] in ("O1", "O2")
-        from apex import amp
-        models, optimizer = amp.initialize([model, ema_model], optimizer, opt_level=config["with_amp_level"])
-        model, ema_model = models
-
-    if distributed:
-        model = DDP(model, device_ids=[config["local_rank"],])
-        # ema_model has no grads => DDP wont work        
-    elif config["with_amp_level"] in ("O1", None) and torch.cuda.device_count() > 0:
-        model = nn.parallel.DataParallel(model)
-        ema_model = nn.parallel.DataParallel(ema_model)
-
-    return model, ema_model, optimizer

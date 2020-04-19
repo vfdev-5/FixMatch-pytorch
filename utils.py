@@ -7,14 +7,21 @@ import numpy as np
 
 import torch
 import torch.nn as nn
-
+import torch.optim as optim
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import Subset, Dataset, DataLoader
+
 from torchvision import transforms as T
 from torchvision.datasets.cifar import CIFAR10
 
 from ignite.utils import convert_tensor
 
 from ctaugment import OPS, CTAugment, OP
+from wrn import WideResNet
+
+
+device = "cuda"
 
 
 weak_transforms = T.Compose([
@@ -262,3 +269,97 @@ def setup_ema(ema_model, ref_model):
         if isinstance(m1, nn.BatchNorm2d) and isinstance(m2, nn.BatchNorm2d):
             m2.running_mean = m1.running_mean
             m2.running_var = m1.running_var
+
+
+def to_list_str(v):
+    if isinstance(v, torch.Tensor):
+        return " ".join(["%.2f" % i for i in v.tolist()])
+    return "%.2f" % v
+
+
+
+
+def get_dataflow_iters(config, cta, distributed=False):
+
+    # Rescale batch_size and num_workers    
+    ngpus_per_node = torch.cuda.device_count() if distributed else 1
+    ngpus = dist.get_world_size() if distributed else 1
+    batch_size = config["batch_size"] // ngpus
+    num_workers = int((config["num_workers"] + ngpus_per_node - 1) / ngpus_per_node)
+    num_workers //= 3  # 3 dataloaders
+
+    # Setup dataflow
+    if config["num_train_samples_per_class"] == 25:
+        supervised_train_dataset = get_supervised_trainset_0_250(config["data_path"])
+    else:
+        supervised_train_dataset = get_supervised_trainset(
+            config["data_path"],
+            config["num_train_samples_per_class"]
+        )
+
+    supervised_train_loader = get_supervised_train_loader(
+        supervised_train_dataset,
+        transforms=weak_transforms,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        sampler=DistributedSampler(supervised_train_dataset) if distributed else None
+    )
+
+    cta_probe_loader = get_cta_probe_loader(
+        supervised_train_dataset,
+        cta=cta,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        sampler=DistributedSampler(supervised_train_dataset) if distributed else None
+    )
+    
+    full_train_dataset = CIFAR10(config["data_path"], train=True)
+    unsupervised_train_loader = get_unsupervised_train_loader(
+        full_train_dataset,
+        transforms_weak=weak_transforms,
+        transforms_strong=partial(cta_image_transforms, cta=cta),
+        batch_size=batch_size * config["mu_ratio"],
+        num_workers=num_workers,
+        sampler=DistributedSampler(full_train_dataset) if distributed else None
+    )
+
+    # Setup training/validation loops
+    supervised_train_loader_iter = cycle(supervised_train_loader)
+    unsupervised_train_loader_iter = cycle(unsupervised_train_loader)
+    cta_probe_loader_iter = cycle(cta_probe_loader)
+
+    return supervised_train_loader_iter, unsupervised_train_loader_iter, cta_probe_loader_iter
+
+
+def get_models_optimizer(config, distributed=False):
+    
+    # Setup model, optimizer
+    model = WideResNet(num_classes=10)
+    model = model.to(device)
+
+    # Setup EMA model
+    ema_model = WideResNet(num_classes=10).to(device)
+    setup_ema(ema_model, model)
+
+    optimizer = optim.SGD(
+        model.parameters(),
+        lr=config["learning_rate"],
+        momentum=config["momentum"],
+        weight_decay=config["weight_decay"],
+        nesterov=True,
+    )
+
+    if config["with_amp_level"] is not None:
+        assert config["with_amp_level"] in ("O1", "O2")
+        from apex import amp
+        models, optimizer = amp.initialize([model, ema_model], optimizer, opt_level=config["with_amp_level"])
+        model, ema_model = models
+
+    if distributed:
+        model = DDP(model, device_ids=[config["local_rank"],])
+        # ema_model has no grads => DDP wont work        
+    elif config["with_amp_level"] in ("O1", None) and torch.cuda.device_count() > 0:
+        model = nn.parallel.DataParallel(model)
+        ema_model = nn.parallel.DataParallel(ema_model)
+
+    return model, ema_model, optimizer

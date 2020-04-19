@@ -19,8 +19,40 @@ python -u main_fixmatch.py
 
 ## TODO
 
-* [ ] Resume training from existing checkpoint:
+BUGS:
+* [x] Memory leak    
+
+* [x] Resume training from existing checkpoint:
     * [x] save/load CTA
     * [x] save ema model
-* [ ] Logging to online platform: NeptuneML or Trains or W&B
+
 * [ ] DDP: Synchronize CTA across processes
+
+* [ ] Logging to online platform: NeptuneML or Trains or W&B
+
+* [ ] Replace PIL augmentations with Albumentations
+
+```python
+class BlurLimitSampler:
+    def __init__(self, blur, weights):
+        self.blur = blur # [3, 5, 7]
+        self.weights = weights # [0.1, 0.5, 0.4]    
+    def get_params(self):
+        return {"ksize": int(random.choice(self.blur, p=self.weights))}
+        
+class Blur(ImageOnlyTransform):
+    def __init__(self, blur_limit, always_apply=False, p=0.5):
+        super(Blur, self).__init__(always_apply, p)
+        self.blur_limit = blur_limit    
+        
+    def apply(self, image, ksize=3, **params):
+        return F.blur(image, ksize)    
+    
+    def get_params(self):
+        if isinstance(self.blur_limit, BlurLimitSampler):
+            return self.blur_limit.get_params()
+        return {"ksize": int(random.choice(np.arange(self.blur_limit[0], self.blur_limit[1] + 1, 2)))}    
+    
+    def get_transform_init_args_names(self):
+        return ("blur_limit",)
+```
