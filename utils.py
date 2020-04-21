@@ -8,9 +8,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import Subset, Dataset, DataLoader
+
 
 from torchvision import transforms as T
 from torchvision.datasets.cifar import CIFAR10
@@ -248,9 +250,12 @@ def stats(cta):
 
 
 def interleave(x, batch, inverse=False):
-    # def interleave(x, batch):
-    #     s = x.get_shape().as_list()
-    #     return tf.reshape(tf.transpose(tf.reshape(x, [-1, batch] + s[1:]), [1, 0] + list(range(2, 1+len(s)))), [-1] + s[1:])
+    """
+    TF code
+    def interleave(x, batch):
+        s = x.get_shape().as_list()
+        return tf.reshape(tf.transpose(tf.reshape(x, [-1, batch] + s[1:]), [1, 0] + list(range(2, 1+len(s)))), [-1] + s[1:])
+    """
     shape = x.shape
     axes = [batch, -1] if inverse else [-1, batch]
     return x.reshape(*axes, *shape[1:]).transpose(0, 1).reshape(-1, *shape[1:])
@@ -275,8 +280,6 @@ def to_list_str(v):
     if isinstance(v, torch.Tensor):
         return " ".join(["%.2f" % i for i in v.tolist()])
     return "%.2f" % v
-
-
 
 
 def get_dataflow_iters(config, cta, distributed=False):

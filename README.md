@@ -16,6 +16,11 @@ pip install --upgrade --pre pytorch-ignite
 python -u main_fixmatch.py
 # or python -u main_fixmatch.py --params "data_path=/path/to/cifar10"
 ```
+### DDP
+
+```bash
+python -u -m torch.distributed.launch --nproc_per_node=2 main_fixmatch.py --params="dist_backend='nccl'"
+```
 
 ## TODO
 
@@ -26,7 +31,10 @@ BUGS:
     * [x] save/load CTA
     * [x] save ema model
 
-* [ ] DDP: Synchronize CTA across processes
+* [x] DDP: Synchronize CTA across processes
+
+* [ ] Bug: DDP performances are worse than DP on the first epochs
+    * [ ] Increase batch_size -> batch_size * WS => LR, epoch_length
 
 * [ ] Logging to online platform: NeptuneML or Trains or W&B
 

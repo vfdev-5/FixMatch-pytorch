@@ -54,7 +54,7 @@ def run(trainer, config):
     unsup_criterion = nn.CrossEntropyLoss(reduction='none').to(utils.device)
 
     num_epochs = config["num_epochs"]
-    epoch_length = config["epoch_length"]
+    epoch_length = config["epoch_length"]    
     total_num_iters = num_epochs * epoch_length
     lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_num_iters, eta_min=0.0)
 
@@ -64,7 +64,6 @@ def run(trainer, config):
         model=model, ema_model=ema_model, optimizer=optimizer,
         sup_criterion=sup_criterion, unsup_criterion=unsup_criterion,
         cta=cta,
-        device=utils.device
     )
 
     # Setup handler to prepare data batches
@@ -72,7 +71,7 @@ def run(trainer, config):
     def prepare_batch(e):
         sup_batch = next(supervised_train_loader_iter)
         unsup_batch = next(unsupervised_train_loader_iter)
-        cta_probe_batch = next(cta_probe_loader_iter)        
+        cta_probe_batch = next(cta_probe_loader_iter)
         e.state.batch = {
             "sup_batch": utils.sup_prepare_batch(sup_batch, utils.device, non_blocking=True),
             "unsup_batch": (
@@ -119,27 +118,30 @@ def run(trainer, config):
             ema_param.data.mul_(ema_decay).add_(param.data, alpha=1.0 - ema_decay)
 
     # Setup handlers for debugging
-    if debug and rank == 0:
+    if debug:
 
         @trainer.on(Events.STARTED | Events.ITERATION_COMPLETED(every=100))
         def log_weights_norms(_):
-            wn = []
-            ema_wn = []
-            for ema_param, param in zip(ema_model.parameters(), model.parameters()):
-                wn.append(torch.mean(param.data))
-                ema_wn.append(torch.mean(ema_param.data))
 
-            print("\n\nWeights norms")
-            print("\n- Raw model: {}".format(utils.to_list_str(torch.tensor(wn[:10] + wn[-10:]))))
-            print("- EMA model: {}\n".format(utils.to_list_str(torch.tensor(ema_wn[:10] + ema_wn[-10:]))))
+            if rank == 0:
+                wn = []
+                ema_wn = []
+                for ema_param, param in zip(ema_model.parameters(), model.parameters()):
+                    wn.append(torch.mean(param.data))
+                    ema_wn.append(torch.mean(ema_param.data))
 
-        profiler = BasicTimeProfiler()
-        profiler.attach(trainer)
-        
-        @trainer.on(Events.ITERATION_COMPLETED(every=200))
-        def log_profiling(_):
-            results = profiler.get_results()
-            profiler.print_results(results)
+                print("\n\nWeights norms")
+                print("\n- Raw model: {}".format(utils.to_list_str(torch.tensor(wn[:10] + wn[-10:]))))
+                print("- EMA model: {}\n".format(utils.to_list_str(torch.tensor(ema_wn[:10] + ema_wn[-10:]))))
+
+        if rank == 0:
+            profiler = BasicTimeProfiler()
+            profiler.attach(trainer)
+            
+            @trainer.on(Events.ITERATION_COMPLETED(every=200))
+            def log_profiling(_):
+                results = profiler.get_results()
+                profiler.print_results(results)
 
     # Setup validation engine
     metrics = {
@@ -190,7 +192,7 @@ def run(trainer, config):
         if config["display_iters"]:
             ProgressBar(persist=False, desc="Test evaluation").attach(evaluator)
             ProgressBar(persist=False, desc="Test EMA evaluation").attach(ema_evaluator)
-
+    
     data = list(range(epoch_length))
 
     resume_from = list(Path(config["output_path"]).rglob("training_checkpoint*.pt*"))
@@ -211,6 +213,8 @@ def run(trainer, config):
 
     if rank == 0:
         tb_logger.close()
+
+    supervised_train_loader_iter = unsupervised_train_loader_iter = cta_probe_loader_iter = None
 
 
 def main(trainer, config):
@@ -238,8 +242,8 @@ def main(trainer, config):
                 value = eval(value)
             config[key] = value
 
-    if config["local_rank"] == 0:
-        ds_id = "{}".format(config["num_train_samples_per_class"] * 10)
+    ds_id = "{}".format(config["num_train_samples_per_class"] * 10)
+    if config["local_rank"] == 0:    
         print("SSL Training of {} on CIFAR10@{}".format(config["model"], ds_id))
         print("- PyTorch version: {}".format(torch.__version__))
         print("- Ignite version: {}".format(ignite.__version__))

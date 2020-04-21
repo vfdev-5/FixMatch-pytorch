@@ -1,4 +1,5 @@
 # https://raw.githubusercontent.com/google-research/fixmatch/master/libml/ctaugment.py
+#
 # Copyright 2019 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,6 +20,7 @@ from collections import namedtuple
 import numpy as np
 from PIL import Image, ImageOps, ImageEnhance, ImageFilter
 
+
 OPS = {}
 OP = namedtuple('OP', ('f', 'bins'))
 Sample = namedtuple('Sample', ('train', 'probe'))
@@ -30,15 +32,6 @@ def register(*bins):
         return f
 
     return wrap
-
-
-def apply(x, ops):
-    if ops is None:
-        return x
-    y = Image.fromarray(np.round(127.5 * (1 + x)).clip(0, 255).astype('uint8'))
-    for op, args in ops:
-        y = OPS[op].f(y, *args)
-    return np.asarray(y).astype('f') / 127.5 - 1
 
 
 class CTAugment:
