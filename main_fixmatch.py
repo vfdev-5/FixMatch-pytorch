@@ -1,5 +1,3 @@
-from collections import defaultdict
-
 import torch
 import torch.distributed as dist
 
@@ -86,7 +84,7 @@ class FixMatchTrainer(BaseTrainer):
         super(FixMatchTrainer, self).setup(**kwargs)
         self.confidence_threshold = self.config["confidence_threshold"]
         self.lambda_u = self.config["lambda_u"]
-        # self.add_event_handler(Events.ITERATION_COMPLETED, self.update_cta_rates)
+        self.add_event_handler(Events.ITERATION_COMPLETED, self.update_cta_rates)
         self.distributed = dist.is_available() and dist.is_initialized()
 
     def update_cta_rates(self):
@@ -122,6 +120,7 @@ class FixMatchTrainer(BaseTrainer):
                 for t in tensor_list:
                     k, bins, error = unpack_from_tensor(t)        
                     self.cta.update_rates([(k, bins), ], 1.0 - 0.5 * error)
+
 
 if __name__ == "__main__":
     main(FixMatchTrainer(), get_default_config())

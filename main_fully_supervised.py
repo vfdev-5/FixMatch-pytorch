@@ -1,11 +1,4 @@
-from collections import defaultdict
-
-import torch
 import torch.distributed as dist
-
-from ignite.engine import Events
-
-import utils
 from base_train import main, BaseTrainer, get_default_config
 
 
@@ -40,6 +33,7 @@ class FullySupervisedTrainer(BaseTrainer):
     def setup(self, **kwargs):
         super(FullySupervisedTrainer, self).setup(**kwargs)
         self.distributed = dist.is_available() and dist.is_initialized()
+
 
 if __name__ == "__main__":
     main(FullySupervisedTrainer(), get_default_config())

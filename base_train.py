@@ -1,5 +1,4 @@
 import argparse
-from functools import partial
 from pathlib import Path
 import yaml
 import hashlib
@@ -25,7 +24,8 @@ import utils
 
 def run(trainer, config):
     assert isinstance(trainer, BaseTrainer)
-    
+
+    debug = config["debug"]
     local_rank = config["local_rank"]
     distributed = dist.is_available() and dist.is_initialized()
     if distributed:
@@ -33,8 +33,6 @@ def run(trainer, config):
     rank = dist.get_rank() if distributed else 0
 
     torch.manual_seed(config["seed"] + rank)
-    
-    debug = config["debug"]
 
     cta = utils.get_default_cta()
 
@@ -61,7 +59,7 @@ def run(trainer, config):
     # Setup trainer
     trainer.setup(
         config=config,
-        model=model, ema_model=ema_model, optimizer=optimizer,
+        model=model, ema_model=ema_model, optimizer=optimizer, lr_scheduler=lr_scheduler,
         sup_criterion=sup_criterion, unsup_criterion=unsup_criterion,
         cta=cta,
     )
@@ -84,31 +82,6 @@ def run(trainer, config):
             )
         }
         sup_batch = unsup_batch = cta_probe_batch = None
-
-    # Setup other common handlers for the trainer
-    to_save = {
-        "model": model, 
-        "ema_model": ema_model, 
-        "optimizer": optimizer, 
-        "trainer": trainer, 
-        "lr_scheduler": lr_scheduler,
-        "cta": cta
-    }
-
-    if config["with_amp_level"] is not None:
-        from apex import amp
-        to_save["amp"] = amp
-
-    common.setup_common_training_handlers(
-        trainer,
-        to_save=None if debug else to_save,
-        save_every_iters=config["checkpoint_every"],
-        output_path=config["output_path"],
-        output_names=trainer.output_names,
-        lr_scheduler=lr_scheduler,
-        with_pbar_on_iters=config["display_iters"],
-        log_every_iters=2
-    )
 
     # Setup handler to update EMA model
     @trainer.on(Events.ITERATION_COMPLETED, config["ema_decay"])
@@ -203,7 +176,7 @@ def run(trainer, config):
         if rank == 0:
             print("Resume from a checkpoint: {}".format(checkpoint_fp.as_posix()))
         checkpoint = torch.load(checkpoint_fp.as_posix())
-        Checkpoint.load_objects(to_load=to_save, checkpoint=checkpoint)
+        Checkpoint.load_objects(to_load=trainer.to_save, checkpoint=checkpoint)
 
     try:
         trainer.run(data, epoch_length=epoch_length, max_epochs=config["num_epochs"] if not debug else 1)
@@ -300,13 +273,47 @@ def main(trainer, config):
 
 class BaseTrainer(Engine):
 
+    output_names = []
+
     def __init__(self):
         super(BaseTrainer, self).__init__(self.train_step)
+        self.config = self.model = self.ema_model = self.optimizer = None
+        self.lr_scheduler = self.sup_criterion = self.unsup_criterion = None
+        self.cta = self.to_save = None
 
     def setup(self, **kwargs):
         for k, v in kwargs.items():
             if k != 'self' and not k.startswith('_'):
                 setattr(self, k, v)
+        self._setup_common_handlers()
+
+    def _setup_common_handlers(self):
+        # Setup other common handlers for the trainer
+        debug = self.config["debug"]
+
+        self.to_save = {
+            "model": self.model,
+            "ema_model": self.ema_model,
+            "optimizer": self.optimizer,
+            "trainer": self,
+            "lr_scheduler": self.lr_scheduler,
+            "cta": self.cta
+        }
+
+        if self.config["with_amp_level"] is not None:
+            from apex import amp
+            self.to_save["amp"] = amp
+
+        common.setup_common_training_handlers(
+            self,
+            to_save=None if debug else self.to_save,
+            save_every_iters=self.config["checkpoint_every"],
+            output_path=self.config["output_path"],
+            output_names=self.output_names,
+            lr_scheduler=self.lr_scheduler,
+            with_pbar_on_iters=self.config["display_iters"],
+            log_every_iters=2
+        )
 
     def train_step(self, engine, batch):
         raise NotImplementedError("This is the base class")
@@ -328,6 +335,8 @@ def get_default_config():
         "epoch_length": 2 ** 16 // batch_size,  # epoch_length * num_epochs == 2 ** 20
         "learning_rate": 0.03,
         "validate_every": 1,
+
+        "device": "cuda",  # possible values "cuda" or "xla"
 
         # AMP
         "with_amp_level": None,  # if "O1" or "O2" -> train with apex/amp, otherwise fp32 (None)
