@@ -1,5 +1,6 @@
-import torch.distributed as dist
-from base_train import main, BaseTrainer, get_default_config
+from base_train import main, BaseTrainer
+from configs import get_default_config
+import dist_utils
 
 
 class FullySupervisedTrainer(BaseTrainer):
@@ -17,22 +18,21 @@ class FullySupervisedTrainer(BaseTrainer):
         # supervised learning:
         sup_loss = self.sup_criterion(y_pred, y)
 
-        if self.config["with_amp_level"] is not None:
+        if self.config["with_nv_amp_level"] is not None:
             from apex import amp
             with amp.scale_loss(sup_loss, self.optimizer) as scaled_loss:
                 scaled_loss.backward()
         else:
             sup_loss.backward()
 
-        self.optimizer.step()
+        if dist_utils.is_tpu_distributed():
+            dist_utils.xm.optimizer_step(self.optimizer)
+        else:
+            self.optimizer.step()
 
         return {
             "sup_loss": sup_loss.item(),
         }
-
-    def setup(self, **kwargs):
-        super(FullySupervisedTrainer, self).setup(**kwargs)
-        self.distributed = dist.is_available() and dist.is_initialized()
 
 
 if __name__ == "__main__":

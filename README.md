@@ -16,11 +16,24 @@ pip install --upgrade --pre pytorch-ignite
 python -u main_fixmatch.py
 # or python -u main_fixmatch.py --params "data_path=/path/to/cifar10"
 ```
-### DDP
+### DDP on GPUs
 
 ```bash
-python -u -m torch.distributed.launch --nproc_per_node=2 main_fixmatch.py --params="dist_backend='nccl'"
+python -u -m torch.distributed.launch --nproc_per_node=2 main_fixmatch.py --params="distributed=True"
 ```
+
+### Single TPU
+```bash
+python -u main_fixmatch.py --params="device='xla'"
+```
+
+
+### 8 TPUs on Colab
+
+```bash
+#python -u -m torch.distributed.launch --nproc_per_node=2 main_fixmatch.py --params="distributed=True;device='xla'"
+```
+
 
 ## TODO
 

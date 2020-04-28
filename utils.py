@@ -21,9 +21,7 @@ from ignite.utils import convert_tensor
 
 from ctaugment import OPS, CTAugment, OP
 from wrn import WideResNet
-
-
-device = "cuda"
+import dist_utils
 
 
 weak_transforms = T.Compose([
@@ -149,6 +147,13 @@ def get_test_loader(root, transforms=test_transforms, **dataloader_kwargs):
         ),
         **dataloader_kwargs
     )
+
+    if dist_utils.is_tpu_distributed():
+        import torch_xla.core.xla_model as xm
+        from torch_xla.distributed.parallel_loader import ParallelLoader
+
+        test_loader = ParallelLoader(test_loader, [xm.xla_device(), ])
+
     return test_loader
 
 
@@ -284,11 +289,15 @@ def to_list_str(v):
 
 def get_dataflow_iters(config, cta, distributed=False):
 
-    # Rescale batch_size and num_workers    
-    ngpus_per_node = torch.cuda.device_count() if distributed else 1
-    ngpus = dist.get_world_size() if distributed else 1
-    batch_size = config["batch_size"] // ngpus
-    num_workers = int((config["num_workers"] + ngpus_per_node - 1) / ngpus_per_node)
+    batch_size = config["batch_size"]
+    num_workers = config["num_workers"]
+
+    # Rescale batch_size and num_workers
+    batch_size //= dist_utils.get_world_size()
+
+    if distributed:
+        nproc_per_node = dist_utils.get_num_proc_per_node()
+        num_workers = int((num_workers + nproc_per_node - 1) / nproc_per_node)
     num_workers //= 3  # 3 dataloaders
 
     # Setup dataflow
@@ -300,22 +309,36 @@ def get_dataflow_iters(config, cta, distributed=False):
             config["num_train_samples_per_class"]
         )
 
+    dist_sampler_kwargs = {"num_replicas": dist_utils.get_world_size(), "rank": dist_utils.get_rank()}
+
     supervised_train_loader = get_supervised_train_loader(
         supervised_train_dataset,
         transforms=weak_transforms,
         batch_size=batch_size,
         num_workers=num_workers,
-        sampler=DistributedSampler(supervised_train_dataset) if distributed else None
+        sampler=DistributedSampler(supervised_train_dataset, **dist_sampler_kwargs) if distributed else None
     )
+
+    if dist_utils.is_tpu_distributed():
+        import torch_xla.core.xla_model as xm
+        from torch_xla.distributed.parallel_loader import ParallelLoader
+
+        supervised_train_loader = ParallelLoader(supervised_train_loader, [xm.xla_device(), ])
 
     cta_probe_loader = get_cta_probe_loader(
         supervised_train_dataset,
         cta=cta,
         batch_size=batch_size,
         num_workers=num_workers,
-        sampler=DistributedSampler(supervised_train_dataset) if distributed else None
+        sampler=DistributedSampler(supervised_train_dataset, **dist_sampler_kwargs) if distributed else None
     )
-    
+
+    if dist_utils.is_tpu_distributed():
+        import torch_xla.core.xla_model as xm
+        from torch_xla.distributed.parallel_loader import ParallelLoader
+
+        cta_probe_loader = ParallelLoader(cta_probe_loader, [xm.xla_device(), ])
+
     full_train_dataset = CIFAR10(config["data_path"], train=True)
     unsupervised_train_loader = get_unsupervised_train_loader(
         full_train_dataset,
@@ -323,8 +346,14 @@ def get_dataflow_iters(config, cta, distributed=False):
         transforms_strong=partial(cta_image_transforms, cta=cta),
         batch_size=batch_size * config["mu_ratio"],
         num_workers=num_workers,
-        sampler=DistributedSampler(full_train_dataset) if distributed else None
+        sampler=DistributedSampler(full_train_dataset, **dist_sampler_kwargs) if distributed else None
     )
+
+    if dist_utils.is_tpu_distributed():
+        import torch_xla.core.xla_model as xm
+        from torch_xla.distributed.parallel_loader import ParallelLoader
+
+        unsupervised_train_loader = ParallelLoader(unsupervised_train_loader, [xm.xla_device(), ])
 
     # Setup training/validation loops
     supervised_train_loader_iter = cycle(supervised_train_loader)
@@ -335,7 +364,12 @@ def get_dataflow_iters(config, cta, distributed=False):
 
 
 def get_models_optimizer(config, distributed=False):
-    
+
+    device = config["device"]
+    if device == "xla":
+        import torch_xla.core.xla_model as xm
+        device = xm.xla_device()
+
     # Setup model, optimizer
     model = WideResNet(num_classes=10)
     model = model.to(device)
@@ -352,16 +386,16 @@ def get_models_optimizer(config, distributed=False):
         nesterov=True,
     )
 
-    if config["with_amp_level"] is not None:
-        assert config["with_amp_level"] in ("O1", "O2")
+    if device == "cuda" and (config["with_nv_amp_level"] is not None):
+        assert config["with_nv_amp_level"] in ("O1", "O2")
         from apex import amp
         models, optimizer = amp.initialize([model, ema_model], optimizer, opt_level=config["with_amp_level"])
         model, ema_model = models
 
-    if distributed:
-        model = DDP(model, device_ids=[config["local_rank"],])
+    if distributed and device == "cuda":
+        model = DDP(model, device_ids=[config["local_rank"], ])
         # ema_model has no grads => DDP wont work        
-    elif config["with_amp_level"] in ("O1", None) and torch.cuda.device_count() > 0:
+    elif config["with_nv_amp_level"] in ("O1", None) and device == "cuda" and torch.cuda.device_count() > 0:
         model = nn.parallel.DataParallel(model)
         ema_model = nn.parallel.DataParallel(ema_model)
 

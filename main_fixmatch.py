@@ -4,7 +4,8 @@ import torch.distributed as dist
 from ignite.engine import Events
 
 import utils
-from base_train import main, BaseTrainer, get_default_config
+from base_train import main, BaseTrainer
+from configs import get_default_config
 from ctaugment import OPS
 
 
@@ -120,6 +121,15 @@ class FixMatchTrainer(BaseTrainer):
                 for t in tensor_list:
                     k, bins, error = unpack_from_tensor(t)        
                     self.cta.update_rates([(k, bins), ], 1.0 - 0.5 * error)
+
+
+def get_fixmatch_config():
+    config = get_default_config()
+    config.update({
+        # FixMatch settings
+        "confidence_threshold": 0.95,
+        "lambda_u": 1.0,
+    })
 
 
 if __name__ == "__main__":

@@ -7,8 +7,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-import torch.distributed as dist
-
 import ignite
 from ignite.engine import Events, Engine, create_supervised_evaluator
 from ignite.metrics import Accuracy, Precision, Recall
@@ -20,17 +18,24 @@ from ignite.contrib.handlers import ProgressBar
 from ignite.contrib.handlers.time_profilers import BasicTimeProfiler
 
 import utils
+import dist_utils
 
 
 def run(trainer, config):
     assert isinstance(trainer, BaseTrainer)
-
     debug = config["debug"]
+
+    device = config["device"]
+    if device == "xla":
+        import torch_xla.core.xla_model as xm
+        device = xm.xla_device()
+    distributed = config["distributed"]
+
     local_rank = config["local_rank"]
-    distributed = dist.is_available() and dist.is_initialized()
-    if distributed:
+    rank = dist_utils.get_rank()
+
+    if distributed and device == "cuda":
         torch.cuda.set_device(local_rank)
-    rank = dist.get_rank() if distributed else 0
 
     torch.manual_seed(config["seed"] + rank)
 
@@ -48,8 +53,8 @@ def run(trainer, config):
 
     model, ema_model, optimizer = utils.get_models_optimizer(config, distributed)
 
-    sup_criterion = nn.CrossEntropyLoss().to(utils.device)
-    unsup_criterion = nn.CrossEntropyLoss(reduction='none').to(utils.device)
+    sup_criterion = nn.CrossEntropyLoss()
+    unsup_criterion = nn.CrossEntropyLoss(reduction='none')
 
     num_epochs = config["num_epochs"]
     epoch_length = config["epoch_length"]    
@@ -71,13 +76,13 @@ def run(trainer, config):
         unsup_batch = next(unsupervised_train_loader_iter)
         cta_probe_batch = next(cta_probe_loader_iter)
         e.state.batch = {
-            "sup_batch": utils.sup_prepare_batch(sup_batch, utils.device, non_blocking=True),
+            "sup_batch": utils.sup_prepare_batch(sup_batch, device, non_blocking=True),
             "unsup_batch": (
-                convert_tensor(unsup_batch["image"], utils.device, non_blocking=True),
-                convert_tensor(unsup_batch["strong_aug"], utils.device, non_blocking=True)
+                convert_tensor(unsup_batch["image"], device, non_blocking=True),
+                convert_tensor(unsup_batch["strong_aug"], device, non_blocking=True)
             ),
             "cta_probe_batch": (
-                *utils.sup_prepare_batch(cta_probe_batch, utils.device, non_blocking=True),
+                *utils.sup_prepare_batch(cta_probe_batch, device, non_blocking=True),
                 [utils.deserialize(p) for p in cta_probe_batch['policy']]
             )
         }
@@ -125,11 +130,11 @@ def run(trainer, config):
 
     evaluator = create_supervised_evaluator(
         model, metrics,
-        prepare_batch=utils.sup_prepare_batch, device=utils.device, non_blocking=True
+        prepare_batch=utils.sup_prepare_batch, device=device, non_blocking=True
     )
     ema_evaluator = create_supervised_evaluator(
         ema_model, metrics,
-        prepare_batch=utils.sup_prepare_batch, device=utils.device, non_blocking=True
+        prepare_batch=utils.sup_prepare_batch, device=device, non_blocking=True
     )
 
     def log_results(epoch, max_epochs, metrics, ema_metrics):
@@ -190,7 +195,7 @@ def run(trainer, config):
     supervised_train_loader_iter = unsupervised_train_loader_iter = cta_probe_loader_iter = None
 
 
-def main(trainer, config):
+def main(trainer, config, local_rank=None):
     parser = argparse.ArgumentParser("Semi-Supervised Learning - FixMatch with CTA: Train WRN-28-2 on CIFAR10 dataset")
     parser.add_argument(
         "--params",
@@ -202,10 +207,13 @@ def main(trainer, config):
 
     args = parser.parse_args()
 
-    assert torch.cuda.is_available(), "Training is no GPU only"
-    torch.backends.cudnn.benchmark = True
+    if args.local_rank is not None:
+        local_rank = args.local_rank
 
-    config["local_rank"] = args.local_rank if args.local_rank is not None else 0
+    if local_rank is None:
+        local_rank = 0
+
+    config["local_rank"] = local_rank
 
     # Override config:
     if args.params is not None:
@@ -228,23 +236,23 @@ def main(trainer, config):
             print("\t{}: {}".format(key, value))
         print("\n")
 
-    backend = config["dist_backend"]
-    distributed = backend is not None
-    if distributed:
-        dist.init_process_group(backend, init_method=config["dist_url"])
+    if config["device"] == "cuda":
+        assert torch.cuda.is_available()
+
+    if config["distributed"]:
+        dist_utils.initialize()
         # let each node print the info
         if config["local_rank"] == 0:
             print("\nDistributed setting:")
-            print("\tbackend: {}".format(dist.get_backend()))
-            print("\tworld size: {}".format(dist.get_world_size()))
-            print("\trank: {}".format(dist.get_rank()))
+            print("\tworld size: {}".format(dist_utils.get_world_size()))
+            print("\trank: {}".format(dist_utils.get_rank()))
             print("\n")
 
     conf_hash = hashlib.md5(repr(config).encode("utf-8")).hexdigest()
     prefix = "training" if not config["debug"] else "debug-training"
     output_path = Path(config["output_path"]) / "{}-{}-{}".format(prefix, ds_id, conf_hash)
 
-    if (not distributed) or (dist.get_rank() == 0):
+    if (not config["distributed"]) or (dist_utils.get_rank() == 0):
 
         if not output_path.exists():
             output_path.mkdir(parents=True)
@@ -263,12 +271,12 @@ def main(trainer, config):
     except KeyboardInterrupt:
         print("Catched KeyboardInterrupt -> exit")
     except Exception as e:
-        if distributed:
-            dist.destroy_process_group()
+        if config["distributed"]:
+            dist_utils.finalize()
         raise e
 
-    if distributed:
-        dist.destroy_process_group()
+    if config["distributed"]:
+        dist_utils.finalize()
 
 
 class BaseTrainer(Engine):
@@ -300,7 +308,7 @@ class BaseTrainer(Engine):
             "cta": self.cta
         }
 
-        if self.config["with_amp_level"] is not None:
+        if self.config["with_nv_amp_level"] is not None:
             from apex import amp
             self.to_save["amp"] = amp
 
@@ -317,46 +325,3 @@ class BaseTrainer(Engine):
 
     def train_step(self, engine, batch):
         raise NotImplementedError("This is the base class")
-
-
-def get_default_config():
-    batch_size = 64
-
-    config = {
-        "seed": 12,
-        "data_path": "/tmp/cifar10",
-        "output_path": "/tmp/output-fixmatch-cifar10",
-        "model": "WRN-28-2",
-        "momentum": 0.9,
-        "weight_decay": 0.0005,
-        "batch_size": batch_size,
-        "num_workers": 12,
-        "num_epochs": 1024,
-        "epoch_length": 2 ** 16 // batch_size,  # epoch_length * num_epochs == 2 ** 20
-        "learning_rate": 0.03,
-        "validate_every": 1,
-
-        "device": "cuda",  # possible values "cuda" or "xla"
-
-        # AMP
-        "with_amp_level": None,  # if "O1" or "O2" -> train with apex/amp, otherwise fp32 (None)
-
-        # DDP        
-        "dist_url": "env://",
-        "dist_backend": None,  # if None distributed option is disabled, set to "nccl" to enable
-
-        # SSL settings
-        "num_train_samples_per_class": 25,
-        "mu_ratio": 7,
-        "ema_decay": 0.999,
-
-        # FixMatch settings
-        "confidence_threshold": 0.95,
-        "lambda_u": 1.0,
-
-        # Logging:
-        "display_iters": True,
-        "checkpoint_every": 200,
-        "debug": False
-    }
-    return config
