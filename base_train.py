@@ -144,8 +144,14 @@ def run(trainer, config):
         print(utils.stats(cta))
 
     def run_evaluation():
-        evaluator.run(test_loader)
-        ema_evaluator.run(test_loader)
+        data_loader = test_loader
+        le = None
+        if dist_utils.is_tpu_distributed():
+            le = len(test_loader)
+            data_loader = dist_utils.to_parallel_loader(test_loader)
+
+        evaluator.run(data_loader, epoch_length=le)
+        ema_evaluator.run(data_loader, epoch_length=le)
         if rank == 0:
             log_results(
                 trainer.state.epoch, 
@@ -195,46 +201,7 @@ def run(trainer, config):
     supervised_train_loader_iter = unsupervised_train_loader_iter = cta_probe_loader_iter = None
 
 
-def main(trainer, config, local_rank=None):
-    parser = argparse.ArgumentParser("Semi-Supervised Learning - FixMatch with CTA: Train WRN-28-2 on CIFAR10 dataset")
-    parser.add_argument(
-        "--params",
-        type=str,
-        help="Override default configuration with parameters: "
-        "data_path=/path/to/dataset;batch_size=64;num_workers=12 ...",
-    )
-    parser.add_argument("--local_rank", type=int, help="Local process rank in distributed computation")
-
-    args = parser.parse_args()
-
-    if args.local_rank is not None:
-        local_rank = args.local_rank
-
-    if local_rank is None:
-        local_rank = 0
-
-    config["local_rank"] = local_rank
-
-    # Override config:
-    if args.params is not None:
-        for param in args.params.split(";"):
-            key, value = param.split("=")
-            if "/" not in value:
-                value = eval(value)
-            config[key] = value
-
-    ds_id = "{}".format(config["num_train_samples_per_class"] * 10)
-    if config["local_rank"] == 0:    
-        print("SSL Training of {} on CIFAR10@{}".format(config["model"], ds_id))
-        print("- PyTorch version: {}".format(torch.__version__))
-        print("- Ignite version: {}".format(ignite.__version__))
-        print("- CUDA version: {}".format(torch.version.cuda))
-
-        print("\n")
-        print("Configuration:")
-        for key, value in config.items():
-            print("\t{}: {}".format(key, value))
-        print("\n")
+def worker_task(_, trainer, config):
 
     if config["device"] == "cuda":
         assert torch.cuda.is_available()
@@ -242,17 +209,18 @@ def main(trainer, config, local_rank=None):
     if config["distributed"]:
         dist_utils.initialize()
         # let each node print the info
-        if config["local_rank"] == 0:
+        if dist_utils.get_rank() == 0:
             print("\nDistributed setting:")
             print("\tworld size: {}".format(dist_utils.get_world_size()))
             print("\trank: {}".format(dist_utils.get_rank()))
             print("\n")
 
-    conf_hash = hashlib.md5(repr(config).encode("utf-8")).hexdigest()
-    prefix = "training" if not config["debug"] else "debug-training"
-    output_path = Path(config["output_path"]) / "{}-{}-{}".format(prefix, ds_id, conf_hash)
-
     if (not config["distributed"]) or (dist_utils.get_rank() == 0):
+        ds_id = config["num_train_samples_per_class"] * 10
+        conf_hash = hashlib.md5(repr(config).encode("utf-8")).hexdigest()
+        prefix = "training" if not config["debug"] else "debug-training"
+        prefix += "-{}".format(config["model"])
+        output_path = Path(config["output_path"]) / "{}-{}-{}".format(prefix, ds_id, conf_hash)
 
         if not output_path.exists():
             output_path.mkdir(parents=True)
@@ -260,11 +228,10 @@ def main(trainer, config, local_rank=None):
         # dump config:
         with open((output_path / "config.yaml"), "w") as h:
             yaml.dump(config, h)
-        
-        print("Output path: {}".format(output_path.as_posix()))
 
-    output_path = output_path.as_posix()
-    config["output_path"] = output_path
+        output_path = output_path.as_posix()
+        print("Output path: {}".format(output_path))
+        config["output_path"] = output_path
 
     try:
         run(trainer, config)
@@ -277,6 +244,60 @@ def main(trainer, config, local_rank=None):
 
     if config["distributed"]:
         dist_utils.finalize()
+
+
+def main(trainer, config):
+    parser = argparse.ArgumentParser("Semi-Supervised Learning - FixMatch with CTA: Train WRN-28-2 on CIFAR10 dataset")
+    parser.add_argument(
+        "--params",
+        type=str,
+        help="Override default configuration with parameters: "
+        "data_path=/path/to/dataset;batch_size=64;num_workers=12 ...",
+    )
+    parser.add_argument("--local_rank", type=int, help="Local process rank in distributed computation")
+
+    args = parser.parse_args()
+
+    local_rank = 0
+    if args.local_rank is not None:
+        local_rank = args.local_rank
+
+    config["local_rank"] = local_rank
+
+    # Override config:
+    if args.params is not None:
+        for param in args.params.split(";"):
+            key, value = param.split("=")
+            if "/" not in value:
+                value = eval(value)
+            config[key] = value
+
+    if config["local_rank"] == 0:
+        print("SSL Training of {} on CIFAR10@{}".format(config["model"], config["num_train_samples_per_class"] * 10))
+        print("- PyTorch version: {}".format(torch.__version__))
+        print("- Ignite version: {}".format(ignite.__version__))
+        print("- CUDA version: {}".format(torch.version.cuda))
+
+        print("\n")
+        print("Configuration:")
+        for key, value in config.items():
+            print("\t{}: {}".format(key, value))
+        print("\n")
+
+    # Download dataset
+    if dist_utils.is_gpu_distributed():
+        if dist_utils.get_rank() == 0:
+            utils.CIFAR10(root=config["data_path"], train=True, download=True)
+        dist_utils.dist.barrier()
+
+    if config["distributed"] and config["device"] == "xla":
+        assert dist_utils.has_xla_support
+        import torch_xla.distributed.xla_multiprocessing as xmp
+        # Spawns eight of the map functions, one for each of the eight cores on the Cloud TPU
+        # Note: Colab only supports start_method='fork'
+        xmp.spawn(worker_task, args=(trainer, config), nprocs=8, start_method='fork')
+    else:
+        worker_task(None, trainer, config)
 
 
 class BaseTrainer(Engine):

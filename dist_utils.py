@@ -5,6 +5,7 @@ import torch.distributed as dist
 
 try:
     import torch_xla.core.xla_model as xm
+    from torch_xla.distributed.parallel_loader import ParallelLoader
     has_xla_support = True
 except ImportError:
     has_xla_support = False
@@ -40,7 +41,7 @@ def get_num_proc_per_node():
     if is_gpu_distributed():
         return torch.cuda.device_count()
     elif is_tpu_distributed():
-        return xm.get_xla_supported_devices()
+        return len(xm.get_xla_supported_devices())
     else:
         return 1
 
@@ -85,6 +86,13 @@ def _tpu_sync_all_reduce(self, tensor):
     if tensor_to_number:
         return tensor.item()
     return tensor
+
+
+def to_parallel_loader(data_loader):
+    device = xm.xla_device()
+    data_loader = ParallelLoader(data_loader, [device, ])
+    data_loader = data_loader.per_device_loader(device)
+    return data_loader
 
 
 def _temporary_ignite_metrics_patch():

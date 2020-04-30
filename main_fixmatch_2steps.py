@@ -30,7 +30,7 @@ class FixMatchTwoStepsTrainer(FixMatchTrainer):
             y_pred = self.model(x)
             sup_loss = self.sup_criterion(y_pred, y)
 
-            if self.config["with_amp_level"] is not None:
+            if self.config["with_nv_amp_level"] is not None:
                 from apex import amp
                 with amp.scale_loss(sup_loss, self.optimizer) as scaled_loss:
                     scaled_loss.backward()
@@ -51,7 +51,7 @@ class FixMatchTwoStepsTrainer(FixMatchTrainer):
             max_y_weak_probas, _ = y_weak_probas.max(dim=1)
             unsup_loss_mask = (max_y_weak_probas > self.confidence_threshold).float()
             unsup_loss = (self.unsup_criterion(y_strong_preds, y_pseudo) * unsup_loss_mask).mean()
-            if self.config["with_amp_level"] is not None:
+            if self.config["with_nv_amp_level"] is not None:
                 from apex import amp
                 with amp.scale_loss(unsup_loss, self.optimizer) as scaled_loss:
                     scaled_loss.backward()

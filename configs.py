@@ -38,7 +38,10 @@ def get_default_config():
         # Logging:
         "display_iters": True,
         "checkpoint_every": 200,
-        "debug": False
+        "debug": False,
+
+        # online platform logging:
+        "online_logging": None  # "Neptune" or "WandB"
     }
 
     config.update(get_ssl_config())

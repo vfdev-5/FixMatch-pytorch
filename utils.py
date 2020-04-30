@@ -8,21 +8,19 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import Subset, Dataset, DataLoader
 
-
 from torchvision import transforms as T
 from torchvision.datasets.cifar import CIFAR10
+from torchvision import models as tv_models
 
 from ignite.utils import convert_tensor
 
 from ctaugment import OPS, CTAugment, OP
 from wrn import WideResNet
 import dist_utils
-
 
 weak_transforms = T.Compose([
     T.Pad(4),
@@ -32,12 +30,10 @@ weak_transforms = T.Compose([
     T.Normalize(mean=(0.5, 0.5, 0.5), std=(0.25, 0.25, 0.25))
 ])
 
-
 test_transforms = T.Compose([
     T.ToTensor(),
     T.Normalize(mean=(0.5, 0.5, 0.5), std=(0.25, 0.25, 0.25))
 ])
-
 
 cutout_image_transforms = T.Compose([
     T.ToTensor(),
@@ -87,37 +83,36 @@ def get_supervised_trainset(root, num_train_samples_per_class=25, download=True)
     return Subset(full_train_dataset, supervised_train_indices)
 
 
-def get_supervised_trainset_0_250(root, download=False):
+def get_supervised_trainset_0_250(root, download=True):
     full_train_dataset = CIFAR10(root, train=True, download=download)
 
     supervised_train_indices = [
-        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 
-        16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 
-        30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 
-        44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 
-        58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 
-        72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 
-        86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 
-        100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 
-        111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 
-        122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 
-        133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 
-        144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 
-        155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 
-        166, 167, 169, 170, 171, 172, 173, 174, 175, 177, 178, 
-        179, 180, 181, 182, 183, 185, 186, 187, 188, 189, 190, 
-        191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 202, 
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+        16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
+        30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
+        44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57,
+        58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71,
+        72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85,
+        86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99,
+        100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110,
+        111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121,
+        122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132,
+        133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143,
+        144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154,
+        155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165,
+        166, 167, 169, 170, 171, 172, 173, 174, 175, 177, 178,
+        179, 180, 181, 182, 183, 185, 186, 187, 188, 189, 190,
+        191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 202,
         203, 204, 205, 207, 209, 210, 211, 213, 215, 216, 217,
-        218, 220, 221, 222, 223, 224, 228, 229, 230, 231, 233, 
-        237, 239, 240, 241, 244, 246, 247, 252, 254, 256, 259, 
-        260, 263, 264, 268, 271, 272, 276, 277, 279, 280, 281, 
+        218, 220, 221, 222, 223, 224, 228, 229, 230, 231, 233,
+        237, 239, 240, 241, 244, 246, 247, 252, 254, 256, 259,
+        260, 263, 264, 268, 271, 272, 276, 277, 279, 280, 281,
         284, 285, 290, 293, 296, 308, 317
     ]
     return Subset(full_train_dataset, supervised_train_indices)
 
 
 def get_supervised_train_loader(supervised_train_dataset, transforms=weak_transforms, **dataloader_kwargs):
-
     dataloader_kwargs['pin_memory'] = True
     dataloader_kwargs['drop_last'] = True
     dataloader_kwargs['shuffle'] = dataloader_kwargs.get("sampler", None) is None
@@ -133,12 +128,19 @@ def get_supervised_train_loader(supervised_train_dataset, transforms=weak_transf
 
 
 def get_test_loader(root, transforms=test_transforms, **dataloader_kwargs):
-
     full_test_dataset = CIFAR10(root, train=False, download=False)
 
     dataloader_kwargs['pin_memory'] = True
     dataloader_kwargs['drop_last'] = False
     dataloader_kwargs['shuffle'] = False
+
+    if dist_utils.is_tpu_distributed():
+        dataloader_kwargs["num_workers"] = 1
+        dataloader_kwargs["sampler"] = DistributedSampler(
+            full_test_dataset,
+            num_replicas=dist_utils.get_world_size(),
+            rank=dist_utils.get_rank()
+        )
 
     test_loader = DataLoader(
         TransformedDataset(
@@ -148,16 +150,10 @@ def get_test_loader(root, transforms=test_transforms, **dataloader_kwargs):
         **dataloader_kwargs
     )
 
-    if dist_utils.is_tpu_distributed():
-        import torch_xla.core.xla_model as xm
-        from torch_xla.distributed.parallel_loader import ParallelLoader
-
-        test_loader = ParallelLoader(test_loader, [xm.xla_device(), ])
-
     return test_loader
 
 
-class StorableCTAugment(CTAugment):    
+class StorableCTAugment(CTAugment):
 
     def load_state_dict(self, state):
         for k in ["decay", "depth", "th", "rates"]:
@@ -202,7 +198,6 @@ def cta_probe_transforms(dp, cta, image_transforms=cutout_image_transforms):
 
 
 def get_cta_probe_loader(supervised_train_dataset, cta, **dataloader_kwargs):
-
     dataloader_kwargs['pin_memory'] = True
     dataloader_kwargs['drop_last'] = False
     dataloader_kwargs['shuffle'] = dataloader_kwargs.get("sampler", None) is None
@@ -219,7 +214,6 @@ def get_cta_probe_loader(supervised_train_dataset, cta, **dataloader_kwargs):
 
 
 def get_unsupervised_train_loader(raw_dataset, transforms_weak, transforms_strong, **dataloader_kwargs):
-    
     unsupervised_train_dataset = TransformedDataset(
         raw_dataset,
         transforms=lambda dp: {"image": transforms_weak(dp[0]), "strong_aug": transforms_strong(dp[0])}
@@ -288,7 +282,6 @@ def to_list_str(v):
 
 
 def get_dataflow_iters(config, cta, distributed=False):
-
     batch_size = config["batch_size"]
     num_workers = config["num_workers"]
 
@@ -298,6 +291,7 @@ def get_dataflow_iters(config, cta, distributed=False):
     if distributed:
         nproc_per_node = dist_utils.get_num_proc_per_node()
         num_workers = int((num_workers + nproc_per_node - 1) / nproc_per_node)
+
     num_workers //= 3  # 3 dataloaders
 
     # Setup dataflow
@@ -319,12 +313,6 @@ def get_dataflow_iters(config, cta, distributed=False):
         sampler=DistributedSampler(supervised_train_dataset, **dist_sampler_kwargs) if distributed else None
     )
 
-    if dist_utils.is_tpu_distributed():
-        import torch_xla.core.xla_model as xm
-        from torch_xla.distributed.parallel_loader import ParallelLoader
-
-        supervised_train_loader = ParallelLoader(supervised_train_loader, [xm.xla_device(), ])
-
     cta_probe_loader = get_cta_probe_loader(
         supervised_train_dataset,
         cta=cta,
@@ -332,12 +320,6 @@ def get_dataflow_iters(config, cta, distributed=False):
         num_workers=num_workers,
         sampler=DistributedSampler(supervised_train_dataset, **dist_sampler_kwargs) if distributed else None
     )
-
-    if dist_utils.is_tpu_distributed():
-        import torch_xla.core.xla_model as xm
-        from torch_xla.distributed.parallel_loader import ParallelLoader
-
-        cta_probe_loader = ParallelLoader(cta_probe_loader, [xm.xla_device(), ])
 
     full_train_dataset = CIFAR10(config["data_path"], train=True)
     unsupervised_train_loader = get_unsupervised_train_loader(
@@ -349,12 +331,6 @@ def get_dataflow_iters(config, cta, distributed=False):
         sampler=DistributedSampler(full_train_dataset, **dist_sampler_kwargs) if distributed else None
     )
 
-    if dist_utils.is_tpu_distributed():
-        import torch_xla.core.xla_model as xm
-        from torch_xla.distributed.parallel_loader import ParallelLoader
-
-        unsupervised_train_loader = ParallelLoader(unsupervised_train_loader, [xm.xla_device(), ])
-
     # Setup training/validation loops
     supervised_train_loader_iter = cycle(supervised_train_loader)
     unsupervised_train_loader_iter = cycle(unsupervised_train_loader)
@@ -364,18 +340,26 @@ def get_dataflow_iters(config, cta, distributed=False):
 
 
 def get_models_optimizer(config, distributed=False):
-
     device = config["device"]
     if device == "xla":
         import torch_xla.core.xla_model as xm
         device = xm.xla_device()
 
-    # Setup model, optimizer
-    model = WideResNet(num_classes=10)
-    model = model.to(device)
+    # Setup model, optimizer and setup EMA model
+    if config["model"] == "WRN-28-2":
+        model = WideResNet(num_classes=10)
+        ema_model = WideResNet(num_classes=10)
+    else:
+        name = config["model"]
+        if name in tv_models.__dict__:
+            fn = tv_models.__dict__[name]
+        else:
+            raise RuntimeError("Unknown model name {}".format(name))
+        model = fn(num_classes=10)
+        ema_model = fn(num_classes=10)
 
-    # Setup EMA model
-    ema_model = WideResNet(num_classes=10).to(device)
+    model.to(device)
+    ema_model.to(device)
     setup_ema(ema_model, model)
 
     optimizer = optim.SGD(
@@ -389,7 +373,7 @@ def get_models_optimizer(config, distributed=False):
     if device == "cuda" and (config["with_nv_amp_level"] is not None):
         assert config["with_nv_amp_level"] in ("O1", "O2")
         from apex import amp
-        models, optimizer = amp.initialize([model, ema_model], optimizer, opt_level=config["with_amp_level"])
+        models, optimizer = amp.initialize([model, ema_model], optimizer, opt_level=config["with_nv_amp_level"])
         model, ema_model = models
 
     if distributed and device == "cuda":

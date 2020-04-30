@@ -16,40 +16,48 @@ pip install --upgrade --pre pytorch-ignite
 python -u main_fixmatch.py
 # or python -u main_fixmatch.py --params "data_path=/path/to/cifar10"
 ```
-### DDP on GPUs
 
+This script automatically trains in multiple GPUs (`torch.nn.DistributedParallel`). 
+
+### Distributed Data Parallel (DDP) on multiple GPUs (Experimental)
+
+For example, training on 2 GPUs 
 ```bash
 python -u -m torch.distributed.launch --nproc_per_node=2 main_fixmatch.py --params="distributed=True"
 ```
 
-### Single TPU
+### TPU(s) on Colab (Experimental)
+
+#### Installation
+```bash
+VERSION = "1.5"
+!curl https://raw.githubusercontent.com/pytorch/xla/master/contrib/scripts/env-setup.py -o pytorch-xla-env-setup.py
+!python pytorch-xla-env-setup.py --version $VERSION
+```
+
+#### Single TPU
 ```bash
 python -u main_fixmatch.py --params="device='xla'"
 ```
 
-
-### 8 TPUs on Colab
+#### 8 TPUs on Colab
 
 ```bash
-#python -u -m torch.distributed.launch --nproc_per_node=2 main_fixmatch.py --params="distributed=True;device='xla'"
+python -u main_fixmatch.py --params="device='xla';distributed=True"
 ```
 
-
 ## TODO
-
-BUGS:
-* [x] Memory leak    
 
 * [x] Resume training from existing checkpoint:
     * [x] save/load CTA
     * [x] save ema model
 
-* [x] DDP: Synchronize CTA across processes
+* [ ] DDP: 
+    * [x] Synchronize CTA across processes
+    * [x] Unified GPU and TPU approach    
+    * [ ] Bug: DDP performances are worse than DP on the first epochs        
 
-* [ ] Bug: DDP performances are worse than DP on the first epochs
-    * [ ] Increase batch_size -> batch_size * WS => LR, epoch_length
-
-* [ ] Logging to online platform: NeptuneML or Trains or W&B
+* [ ] Logging to an online platform: NeptuneML or Trains or W&B
 
 * [ ] Replace PIL augmentations with Albumentations
 

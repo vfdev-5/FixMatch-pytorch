@@ -65,7 +65,7 @@ class FixMatchTrainer(BaseTrainer):
 
         total_loss = sup_loss + self.lambda_u * unsup_loss
 
-        if self.config["with_amp_level"] is not None:
+        if self.config["with_nv_amp_level"] is not None:
             from apex import amp
             with amp.scale_loss(total_loss, self.optimizer) as scaled_loss:
                 scaled_loss.backward()
@@ -130,7 +130,8 @@ def get_fixmatch_config():
         "confidence_threshold": 0.95,
         "lambda_u": 1.0,
     })
+    return config
 
 
 if __name__ == "__main__":
-    main(FixMatchTrainer(), get_default_config())
+    main(FixMatchTrainer(), get_fixmatch_config())
