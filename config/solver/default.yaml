@@ -1,0 +1,30 @@
+# @package _group_
+
+num_epochs: 1024
+
+epoch_length: 128  # epoch_length * num_epochs == 2 ** 20
+
+checkpoint_every: 500
+
+validate_every: 1
+
+resume_from: null
+
+optimizer:
+  cls: torch.optim.SGD
+  params:
+    lr: 0.01
+    momentum: 0.9
+    weight_decay: 0.0001
+    nesterov: false
+
+
+supervised_criterion:
+  cls: torch.nn.CrossEntropyLoss
+
+
+lr_scheduler:
+  cls: torch.optim.lr_scheduler.CosineAnnealingLR
+  params:
+    eta_min: 0.0
+    T_max: null

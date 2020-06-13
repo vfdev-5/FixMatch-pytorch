@@ -1,0 +1,15 @@
+hydra:
+  run:
+    dir: /tmp/output-fixmatch-cifar10-hydra/fully_supervised/${now:%Y%m%d-%H%M%S}
+
+seed: 543
+model: "resnet18"
+
+
+
+defaults:
+  - dataset: cifar10
+  - solver: default
+
+
+

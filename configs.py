@@ -28,13 +28,15 @@ def get_default_config():
         "model": "WRN-28-2",
         "momentum": 0.9,
         "weight_decay": 0.0005,
+
         "batch_size": batch_size,
         "num_workers": 12,
+
         "num_epochs": 1024,
         "epoch_length": 2 ** 16 // batch_size,  # epoch_length * num_epochs == 2 ** 20
         "learning_rate": 0.03,
-        "validate_every": 1,
 
+        "validate_every": 1,
         # Logging:
         "display_iters": True,
         "checkpoint_every": 200,

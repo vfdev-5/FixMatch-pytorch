@@ -7,6 +7,7 @@ Based on ["FixMatch: Simplifying Semi-Supervised Learning withConsistency and Co
 ## Requirements
 
 ```bash
+pip install --upgrade --pre hydra-core
 pip install --upgrade --pre pytorch-ignite
 ```
 
