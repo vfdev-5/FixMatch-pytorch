@@ -8,7 +8,12 @@ import utils
 import trainers
 
 
-def training(local_rank, cfg, logger):
+def training(local_rank, cfg):
+
+    logger = setup_logger(
+        "Fully-Supervised Training",
+        distributed_rank=idist.get_rank()
+    )
 
     if local_rank == 0:
         logger.info(cfg.pretty())
@@ -68,11 +73,7 @@ def training(local_rank, cfg, logger):
 def main(cfg: DictConfig) -> None:
 
     with idist.Parallel(backend=cfg.distributed.backend, nproc_per_node=cfg.distributed.nproc_per_node) as parallel:
-        logger = setup_logger(
-            "Fully-Supervised Training",
-            distributed_rank=idist.get_rank()
-        )
-        parallel.run(training, cfg, logger)
+        parallel.run(training, cfg)
 
 
 if __name__ == "__main__":

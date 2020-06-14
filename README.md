@@ -56,5 +56,6 @@ python -u -m torch.distributed.launch --nproc_per_node=2 main_fixmatch.py model=
 #### 8 TPUs on Colab
 
 ```bash
-python -u main_fixmatch.py model=WRN-28-2 distributed.backend=xla-tpu
-``
+python -u main_fixmatch.py model=resnet18 distributed.backend=xla-tpu distributed.nproc_per_node=8
+# or python -u main_fixmatch.py model=WRN-28-2 distributed.backend=xla-tpu distributed.nproc_per_node=8
+```
