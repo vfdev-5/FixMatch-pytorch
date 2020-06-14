@@ -1,6 +1,6 @@
 hydra:
   run:
-    dir: /tmp/output-fixmatch-cifar10-hydra/fully_supervised/${now:%Y%m%d-%H%M%S}
+    dir: /tmp/output-fixmatch-cifar10-hydra/fixmatch/${now:%Y%m%d-%H%M%S}
   job_logging:
     handlers:
       console:
@@ -8,7 +8,7 @@ hydra:
     root:
       level: WARN
 
-name: fully-supervised
+name: fixmatch
 
 seed: 543
 debug: false
