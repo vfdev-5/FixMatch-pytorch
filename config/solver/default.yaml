@@ -13,7 +13,7 @@ resume_from: null
 optimizer:
   cls: torch.optim.SGD
   params:
-    lr: 0.01
+    lr: 0.03
     momentum: 0.9
     weight_decay: 0.0001
     nesterov: false
