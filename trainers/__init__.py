@@ -93,15 +93,6 @@ def create_trainer(
             cta_probe_batch["policy"] = [deserialize(p) for p in cta_probe_batch["policy"]]
             e.state.batch["cta_probe_batch"] = cta_probe_batch
 
-        # "unsup_batch": (
-            #     convert_tensor(unsup_batch["image"], device, non_blocking=True),
-            #     convert_tensor(unsup_batch["strong_aug"], device, non_blocking=True)
-            # ),
-            # "cta_probe_batch": (
-            #     *utils.sup_prepare_batch(cta_probe_batch, device, non_blocking=True),
-            #     [utils.deserialize(p) for p in cta_probe_batch['policy']]
-            # )
-
     # Setup handler to update EMA model
     @trainer.on(Events.ITERATION_COMPLETED, cfg.ema_decay)
     def update_ema_model(ema_decay):
@@ -174,7 +165,7 @@ def create_trainer(
         msg2 = "\n".join(["\t{:16s}: {}".format(k, to_list_str(v)) for k, v in ema_metrics.items()])
         logger.info("\nEpoch {}/{}\nRaw:\n{}\nEMA:\n{}\n".format(epoch, max_epochs, msg1, msg2))
         if cta is not None:
-            logger.info(stats(cta))
+            logger.info("\n" + stats(cta))
 
     @trainer.on(Events.EPOCH_COMPLETED(every=cfg.solver.validate_every) | Events.STARTED | Events.COMPLETED)
     def run_evaluation():

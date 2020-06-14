@@ -1,15 +1,43 @@
 hydra:
   run:
     dir: /tmp/output-fixmatch-cifar10-hydra/fully_supervised/${now:%Y%m%d-%H%M%S}
+  job_logging:
+    handlers:
+      console:
+        level: WARN
+    root:
+      level: WARN
+
+name: fully-supervised
 
 seed: 543
+debug: false
+
+# model name (from torchvision) to setup model to train. For Wide-Resnet, use "WRN-28-2"
 model: "resnet18"
+num_classes: 10
 
-
+ema_decay: 0.999
 
 defaults:
-  - dataset: cifar10
+  - dataflow: cifar10
   - solver: default
+  - ssl: pseudo
 
 
+solver:
+  unsupervised_criterion:
+    cls: torch.nn.CrossEntropyLoss
+    params:
+      reduction: 'none'
 
+
+distributed:
+  # backend to use for distributed configuration. Possible values: None, "nccl", "xla-tpu", "gloo" etc. Default, None.
+  backend: null
+  # optional argument to setup number of processes per node. It is useful, when main python process is spawning training as child processes.
+  nproc_per_node: null
+
+
+online_exp_tracking:
+  wandb: false

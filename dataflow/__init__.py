@@ -67,7 +67,7 @@ def get_unsupervised_train_loader(dataset_name, root, cta, download=True, **data
 
         strong_transforms = partial(cifar10.cta_image_transforms, cta=cta)
 
-        return get_unsupervised_train_loader(
+        return cifar10.get_unsupervised_train_loader(
             full_train_dataset,
             transforms_weak=cifar10.weak_transforms,
             transforms_strong=strong_transforms,

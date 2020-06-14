@@ -1,12 +1,16 @@
 import torch
-import torch.distributed as dist
 
+import ignite.distributed as idist
 from ignite.engine import Events
+from ignite.utils import manual_seed, setup_logger
+
+import hydra
+from hydra.utils import instantiate
+from omegaconf import DictConfig
 
 import utils
-from base_train import main, BaseTrainer
-from configs import get_default_config
-from ctaugment import OPS
+import trainers
+from ctaugment import get_default_cta, OPS, interleave, deinterleave
 
 
 sorted_op_names = sorted(list(OPS.keys()))
@@ -30,22 +34,43 @@ def unpack_from_tensor(t):
     return sorted_op_names[k_index], bins, error
 
 
-class FixMatchTrainer(BaseTrainer):
+def training(local_rank, cfg, logger):
 
-    output_names = ["total_loss", "sup_loss", "unsup_loss", "mask"]
+    if local_rank == 0:
+        logger.info(cfg.pretty())
 
-    def train_step(self, engine, batch):
-        self.model.train()
-        self.optimizer.zero_grad()
+    rank = idist.get_rank()
+    manual_seed(cfg.seed + rank)
+    device = idist.device()
 
-        x, y = batch["sup_batch"]
-        weak_x, strong_x = batch["unsup_batch"]
+    model, ema_model, optimizer, sup_criterion, lr_scheduler = utils.initialize(cfg)
+
+    unsup_criterion = instantiate(cfg.solver.unsupervised_criterion)
+
+    cta = get_default_cta()
+
+    supervised_train_loader, test_loader, unsup_train_loader, cta_probe_loader = \
+        utils.get_dataflow(cfg, cta=cta, with_unsup=True)
+
+    def train_step(engine, batch):
+        model.train()
+        optimizer.zero_grad()
+
+        x, y = batch["sup_batch"]["image"], batch["sup_batch"]["target"]
+        if x.device != device:
+            x = x.to(device, non_blocking=True)
+            y = y.to(device, non_blocking=True)
+
+        weak_x, strong_x = batch["unsup_batch"]["image"], batch["unsup_batch"]["strong_aug"]
+        if weak_x.device != device:
+            weak_x = weak_x.to(device, non_blocking=True)
+            strong_x = strong_x.to(device, non_blocking=True)
 
         # according to TF code: single forward pass on concat data: [x, weak_x, strong_x]
-        le = 2 * self.config["mu_ratio"] + 1
-        x_cat = utils.interleave(torch.cat([x, weak_x, strong_x], dim=0), le)
-        y_pred_cat = self.model(x_cat)
-        y_pred_cat = utils.deinterleave(y_pred_cat, le)
+        le = 2 * engine.state.mu_ratio + 1
+        x_cat = interleave(torch.cat([x, weak_x, strong_x], dim=0), le)
+        y_pred_cat = model(x_cat)
+        y_pred_cat = deinterleave(y_pred_cat, le)
 
         idx1 = len(x)
         idx2 = idx1 + len(weak_x)
@@ -54,25 +79,20 @@ class FixMatchTrainer(BaseTrainer):
         y_strong_preds = y_pred_cat[idx2:, ...]    # logits_strong
 
         # supervised learning:
-        sup_loss = self.sup_criterion(y_pred, y)
+        sup_loss = sup_criterion(y_pred, y)
 
         # unsupervised learning:
         y_weak_probas = torch.softmax(y_weak_preds, dim=1).detach()
         y_pseudo = y_weak_probas.argmax(dim=1)
         max_y_weak_probas, _ = y_weak_probas.max(dim=1)
-        unsup_loss_mask = (max_y_weak_probas >= self.confidence_threshold).float()
-        unsup_loss = (self.unsup_criterion(y_strong_preds, y_pseudo) * unsup_loss_mask).mean()
+        unsup_loss_mask = (max_y_weak_probas >= engine.state.confidence_threshold).float()
+        unsup_loss = (unsup_criterion(y_strong_preds, y_pseudo) * unsup_loss_mask).mean()
 
-        total_loss = sup_loss + self.lambda_u * unsup_loss
+        total_loss = sup_loss + engine.state.lambda_u * unsup_loss
 
-        if self.config["with_nv_amp_level"] is not None:
-            from apex import amp
-            with amp.scale_loss(total_loss, self.optimizer) as scaled_loss:
-                scaled_loss.backward()
-        else:
-            total_loss.backward()
+        total_loss.backward()
 
-        self.optimizer.step()
+        optimizer.step()
 
         return {
             "total_loss": total_loss.item(),
@@ -81,57 +101,87 @@ class FixMatchTrainer(BaseTrainer):
             "mask": unsup_loss_mask.mean().item()  # this should not be averaged for DDP
         }
 
-    def setup(self, **kwargs):
-        super(FixMatchTrainer, self).setup(**kwargs)
-        self.confidence_threshold = self.config["confidence_threshold"]
-        self.lambda_u = self.config["lambda_u"]
-        self.add_event_handler(Events.ITERATION_COMPLETED, self.update_cta_rates)
-        self.distributed = dist.is_available() and dist.is_initialized()
+    output_names = ["total_loss", "sup_loss", "unsup_loss", "mask"]
 
-    def update_cta_rates(self):
-        x, y, policies = self.state.batch["cta_probe_batch"]
-        self.ema_model.eval()
+    trainer = trainers.create_trainer(
+        train_step,
+        output_names=output_names,
+        model=model,
+        ema_model=ema_model,
+        optimizer=optimizer,
+        lr_scheduler=lr_scheduler,
+        supervised_train_loader=supervised_train_loader,
+        test_loader=test_loader,
+        cfg=cfg,
+        logger=logger,
+        cta=cta,
+        unsup_train_loader=unsup_train_loader,
+        cta_probe_loader=cta_probe_loader
+    )
+
+    trainer.state.confidence_threshold = cfg.ssl.confidence_threshold
+    trainer.state.lambda_u = cfg.ssl.lambda_u
+    trainer.state.mu_ratio = cfg.ssl.mu_ratio
+
+    distributed = idist.get_world_size() > 1
+
+    @trainer.on(Events.ITERATION_COMPLETED)
+    def update_cta_rates():
+        batch = trainer.state.batch
+        x, y = batch["cta_probe_batch"]["image"], batch["cta_probe_batch"]["target"]
+        if x.device != device:
+            x = x.to(device, non_blocking=True)
+            y = y.to(device, non_blocking=True)
+
+        policies = batch["cta_probe_batch"]["policy"]
+
+        ema_model.eval()
         with torch.no_grad():
-            y_pred = self.ema_model(x)
+            y_pred = ema_model(x)
             y_probas = torch.softmax(y_pred, dim=1)  # (N, C)
 
-            if not self.distributed:
-                for y_proba, t, policy in zip(y_probas, y, policies):                
+            if distributed:
+                for y_proba, t, policy in zip(y_probas, y, policies):
                     error = y_proba
                     error[t] -= 1
                     error = torch.abs(error).sum()
-                    self.cta.update_rates(policy, 1.0 - 0.5 * error.item())
+                    cta.update_rates(policy, 1.0 - 0.5 * error.item())
             else:
                 error_per_op = []
                 for y_proba, t, policy in zip(y_probas, y, policies):
                     error = y_proba
                     error[t] -= 1
                     error = torch.abs(error).sum()
-                    for k, bins in policy:            
+                    for k, bins in policy:
                         error_per_op.append(pack_as_tensor(k, bins, error))
                 error_per_op = torch.stack(error_per_op)
-                # all gather 
-                tensor_list = [
-                    torch.empty_like(error_per_op) 
-                    for _ in range(dist.get_world_size())
-                ]
-                dist.all_gather(tensor_list, error_per_op)
-                tensor_list = torch.cat(tensor_list, dim=0)
+                # all gather
+                tensor_list = idist.all_gather(error_per_op)
                 # update cta rates
                 for t in tensor_list:
-                    k, bins, error = unpack_from_tensor(t)        
-                    self.cta.update_rates([(k, bins), ], 1.0 - 0.5 * error)
+                    k, bins, error = unpack_from_tensor(t)
+                    cta.update_rates([(k, bins), ], 1.0 - 0.5 * error)
+
+    epoch_length = cfg.solver.epoch_length
+    num_epochs = cfg.solver.num_epochs if not cfg.debug else 2
+    try:
+        trainer.run(supervised_train_loader, epoch_length=epoch_length, max_epochs=num_epochs)
+    except Exception as e:
+        import traceback
+
+        print(traceback.format_exc())
 
 
-def get_fixmatch_config():
-    config = get_default_config()
-    config.update({
-        # FixMatch settings
-        "confidence_threshold": 0.95,
-        "lambda_u": 1.0,
-    })
-    return config
+@hydra.main(config_path="config", config_name="fixmatch")
+def main(cfg: DictConfig) -> None:
+
+    with idist.Parallel(backend=cfg.distributed.backend, nproc_per_node=cfg.distributed.nproc_per_node) as parallel:
+        logger = setup_logger(
+            "FixMatch Training",
+            distributed_rank=idist.get_rank()
+        )
+        parallel.run(training, cfg, logger)
 
 
 if __name__ == "__main__":
-    main(FixMatchTrainer(), get_fixmatch_config())
+    main()
