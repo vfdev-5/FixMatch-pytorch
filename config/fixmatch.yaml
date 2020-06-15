@@ -1,6 +1,6 @@
 hydra:
   run:
-    dir: /tmp/output-fixmatch-cifar10-hydra/fixmatch/${now:%Y%m%d-%H%M%S}
+    dir: /tmp/output-fixmatch-cifar10/fixmatch/${now:%Y%m%d-%H%M%S}
   job_logging:
     handlers:
       console:
