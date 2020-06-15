@@ -1,0 +1,7 @@
+# @package _group_
+name: cifar10
+
+data_path: "/tmp/cifar10"
+
+batch_size: 64
+num_workers: 12

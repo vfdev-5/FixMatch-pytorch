@@ -22,8 +22,8 @@ from PIL import Image, ImageOps, ImageEnhance, ImageFilter
 
 
 OPS = {}
-OP = namedtuple('OP', ('f', 'bins'))
-Sample = namedtuple('Sample', ('train', 'probe'))
+OP = namedtuple("OP", ("f", "bins"))
+Sample = namedtuple("Sample", ("train", "probe"))
 
 
 def register(*bins):
@@ -41,7 +41,7 @@ class CTAugment:
         self.th = th
         self.rates = {}
         for k, op in OPS.items():
-            self.rates[k] = tuple([np.ones(x, 'f') for x in op.bins])
+            self.rates[k] = tuple([np.ones(x, "f") for x in op.bins])
 
     def rate_to_p(self, rate):
         p = rate + (1 - self.decay)  # Avoid to have all zero.
@@ -78,9 +78,17 @@ class CTAugment:
                 rate[p] = rate[p] * self.decay + proximity * (1 - self.decay)
 
     def stats(self):
-        return '\n'.join('%-16s    %s' % (k, ' / '.join(' '.join('%.2f' % x for x in self.rate_to_p(rate))
-                                                        for rate in self.rates[k]))
-                         for k in sorted(OPS.keys()))
+        return "\n".join(
+            "%-16s    %s"
+            % (
+                k,
+                " / ".join(
+                    " ".join("%.2f" % x for x in self.rate_to_p(rate))
+                    for rate in self.rates[k]
+                ),
+            )
+            for k in sorted(OPS.keys())
+        )
 
 
 def _enhance(x, op, level):
@@ -128,7 +136,10 @@ def cutout(x, level):
     height_loc = np.random.randint(low=0, high=img_height)
     width_loc = np.random.randint(low=0, high=img_width)
     upper_coord = (max(0, height_loc - size // 2), max(0, width_loc - size // 2))
-    lower_coord = (min(img_height, height_loc + size // 2), min(img_width, width_loc + size // 2))
+    lower_coord = (
+        min(img_height, height_loc + size // 2),
+        min(img_width, width_loc + size // 2),
+    )
     pixels = x.load()  # create the pixel map
     for i in range(upper_coord[0], lower_coord[0]):  # for every col:
         for j in range(upper_coord[1], lower_coord[1]):  # For every row
@@ -162,7 +173,14 @@ def rescale(x, scale, method):
     s = x.size
     scale *= 0.25
     crop = (scale * s[0], scale * s[1], s[0] * (1 - scale), s[1] * (1 - scale))
-    methods = (Image.ANTIALIAS, Image.BICUBIC, Image.BILINEAR, Image.BOX, Image.HAMMING, Image.NEAREST)
+    methods = (
+        Image.ANTIALIAS,
+        Image.BICUBIC,
+        Image.BILINEAR,
+        Image.BOX,
+        Image.HAMMING,
+        Image.NEAREST,
+    )
     method = methods[int(method * 5.99)]
     return x.crop(crop).resize(x.size, method)
 
