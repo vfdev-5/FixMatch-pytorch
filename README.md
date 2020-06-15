@@ -3,6 +3,7 @@
 Experiments with "FixMatch" on Cifar10 dataset.
 
 Based on ["FixMatch: Simplifying Semi-Supervised Learning withConsistency and Confidence"](https://arxiv.org/abs/2001.07685)
+and its official [code](https://github.com/google-research/fixmatch).
 
 ## Requirements
 

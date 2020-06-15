@@ -5,14 +5,15 @@ from ctaugment.ctaugment import *
 
 
 class StorableCTAugment(CTAugment):
-
     def load_state_dict(self, state):
         for k in ["decay", "depth", "th", "rates"]:
             assert k in state, "{} not in {}".format(k, state.keys())
             setattr(self, k, state[k])
 
     def state_dict(self):
-        return OrderedDict([(k, getattr(self, k)) for k in ["decay", "depth", "th", "rates"]])
+        return OrderedDict(
+            [(k, getattr(self, k)) for k in ["decay", "depth", "th", "rates"]]
+        )
 
 
 def get_default_cta():
@@ -32,9 +33,17 @@ def deserialize(policy_str):
 
 
 def stats(cta):
-    return '\n'.join('%-16s    %s' % (k, ' / '.join(' '.join('%.2f' % x for x in cta.rate_to_p(rate))
-                                                    for rate in cta.rates[k]))
-                     for k in sorted(OPS.keys()))
+    return "\n".join(
+        "%-16s    %s"
+        % (
+            k,
+            " / ".join(
+                " ".join("%.2f" % x for x in cta.rate_to_p(rate))
+                for rate in cta.rates[k]
+            ),
+        )
+        for k in sorted(OPS.keys())
+    )
 
 
 def interleave(x, batch, inverse=False):

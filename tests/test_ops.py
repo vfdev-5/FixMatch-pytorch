@@ -1,4 +1,3 @@
-import pytest
 
 import numpy as np
 import torch
@@ -8,21 +7,17 @@ from utils import interleave, deinterleave
 
 def np_interleave(x, batch, inverse=False):
     # Code from utils.interleave with tf -> np
-    # 
+    #
     # def interleave(x, batch):
     #     s = x.get_shape().as_list()
-    #     return tf.reshape(tf.transpose(tf.reshape(x, [-1, batch] + s[1:]), [1, 0] + list(range(2, 1+len(s)))), [-1] + s[1:])
+    #     return tf.reshape(
+    #       tf.transpose(tf.reshape(x, [-1, batch] + s[1:]), [1, 0] + list(range(2, 1+len(s)))), [-1] + s[1:]
+    #     )
     s = list(x.shape)
     axes = [-1, batch] if not inverse else [batch, -1]
     return np.reshape(
-        np.transpose(
-            np.reshape(
-                x, 
-                axes + s[1:]
-            ),
-            [1, 0] + list(range(2, 1 + len(s)))
-        ),
-        [-1] + s[1:]
+        np.transpose(np.reshape(x, axes + s[1:]), [1, 0] + list(range(2, 1 + len(s)))),
+        [-1] + s[1:],
     )
 
 

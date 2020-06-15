@@ -6,7 +6,6 @@ from ignite.utils import convert_tensor
 
 
 class TransformedDataset(Dataset):
-
     def __init__(self, dataset, transforms):
         self.dataset = dataset
         self.transforms = transforms
@@ -31,17 +30,23 @@ def cycle(dataloader):
             yield b
 
 
-def get_supervised_train_loader(dataset_name, root, num_train_samples_per_class, download=True, **dataloader_kwargs):
+def get_supervised_train_loader(
+    dataset_name, root, num_train_samples_per_class, download=True, **dataloader_kwargs
+):
     if dataset_name == "cifar10":
-        from dataflow.cifar10 import get_supervised_trainset, get_supervised_train_loader, weak_transforms
+        from dataflow.cifar10 import (
+            get_supervised_trainset,
+            get_supervised_train_loader,
+            weak_transforms,
+        )
 
         train_dataset = get_supervised_trainset(
-            root, num_train_samples_per_class=num_train_samples_per_class, download=download
+            root,
+            num_train_samples_per_class=num_train_samples_per_class,
+            download=download,
         )
 
-        return get_supervised_train_loader(
-            train_dataset, **dataloader_kwargs
-        )
+        return get_supervised_train_loader(train_dataset, **dataloader_kwargs)
 
     else:
         raise ValueError("Unhandled dataset: {}".format(dataset_name))
@@ -57,7 +62,9 @@ def get_test_loader(dataset_name, root, download=True, **dataloader_kwargs):
         raise ValueError("Unhandled dataset: {}".format(dataset_name))
 
 
-def get_unsupervised_train_loader(dataset_name, root, cta, download=True, **dataloader_kwargs):
+def get_unsupervised_train_loader(
+    dataset_name, root, cta, download=True, **dataloader_kwargs
+):
     if dataset_name == "cifar10":
         from dataflow import cifar10
 
@@ -78,20 +85,24 @@ def get_unsupervised_train_loader(dataset_name, root, cta, download=True, **data
         raise ValueError("Unhandled dataset: {}".format(dataset_name))
 
 
-def get_cta_probe_loader(dataset_name, root, num_train_samples_per_class, cta, download=True, **dataloader_kwargs):
+def get_cta_probe_loader(
+    dataset_name,
+    root,
+    num_train_samples_per_class,
+    cta,
+    download=True,
+    **dataloader_kwargs
+):
     if dataset_name == "cifar10":
         from dataflow.cifar10 import get_supervised_trainset, get_cta_probe_loader
 
         train_dataset = get_supervised_trainset(
-            root, num_train_samples_per_class=num_train_samples_per_class, download=download
+            root,
+            num_train_samples_per_class=num_train_samples_per_class,
+            download=download,
         )
 
-        return get_cta_probe_loader(
-            train_dataset,
-            cta=cta,
-            **dataloader_kwargs
-        )
+        return get_cta_probe_loader(train_dataset, cta=cta, **dataloader_kwargs)
 
     else:
         raise ValueError("Unhandled dataset: {}".format(dataset_name))
-

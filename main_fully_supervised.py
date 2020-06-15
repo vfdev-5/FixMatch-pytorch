@@ -11,8 +11,7 @@ import trainers
 def training(local_rank, cfg):
 
     logger = setup_logger(
-        "Fully-Supervised Training",
-        distributed_rank=idist.get_rank()
+        "Fully-Supervised Training", distributed_rank=idist.get_rank()
     )
 
     if local_rank == 0:
@@ -48,7 +47,7 @@ def training(local_rank, cfg):
 
     trainer = trainers.create_trainer(
         train_step,
-        output_names=["sup_loss", ],
+        output_names=["sup_loss",],
         model=model,
         ema_model=ema_model,
         optimizer=optimizer,
@@ -56,13 +55,15 @@ def training(local_rank, cfg):
         supervised_train_loader=supervised_train_loader,
         test_loader=test_loader,
         cfg=cfg,
-        logger=logger
+        logger=logger,
     )
 
     epoch_length = cfg.solver.epoch_length
     num_epochs = cfg.solver.num_epochs if not cfg.debug else 2
     try:
-        trainer.run(supervised_train_loader, epoch_length=epoch_length, max_epochs=num_epochs)
+        trainer.run(
+            supervised_train_loader, epoch_length=epoch_length, max_epochs=num_epochs
+        )
     except Exception as e:
         import traceback
 
@@ -72,7 +73,9 @@ def training(local_rank, cfg):
 @hydra.main(config_path="config", config_name="fully_supervised")
 def main(cfg: DictConfig) -> None:
 
-    with idist.Parallel(backend=cfg.distributed.backend, nproc_per_node=cfg.distributed.nproc_per_node) as parallel:
+    with idist.Parallel(
+        backend=cfg.distributed.backend, nproc_per_node=cfg.distributed.nproc_per_node
+    ) as parallel:
         parallel.run(training, cfg)
 
 

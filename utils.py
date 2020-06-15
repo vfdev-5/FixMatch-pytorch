@@ -1,4 +1,3 @@
-
 import torch.nn as nn
 
 import ignite.distributed as idist
@@ -6,7 +5,12 @@ import ignite.distributed as idist
 from hydra.utils import instantiate
 
 from models import setup_model, setup_ema
-from dataflow import get_supervised_train_loader, get_test_loader, get_unsupervised_train_loader, get_cta_probe_loader
+from dataflow import (
+    get_supervised_train_loader,
+    get_test_loader,
+    get_unsupervised_train_loader,
+    get_cta_probe_loader,
+)
 
 
 def initialize(cfg):
@@ -28,14 +32,18 @@ def initialize(cfg):
     sup_criterion = instantiate(cfg.solver.supervised_criterion)
 
     total_num_iters = cfg.solver.num_epochs * cfg.solver.epoch_length
-    lr_scheduler = instantiate(cfg.solver.lr_scheduler, optimizer, T_max=total_num_iters)
+    lr_scheduler = instantiate(
+        cfg.solver.lr_scheduler, optimizer, T_max=total_num_iters
+    )
 
     return model, ema_model, optimizer, sup_criterion, lr_scheduler
 
 
 def get_dataflow(cfg, cta=None, with_unsup=False):
 
-    num_workers = cfg.dataflow.num_workers if cta is None else cfg.dataflow.num_workers // 2
+    num_workers = (
+        cfg.dataflow.num_workers if cta is None else cfg.dataflow.num_workers // 2
+    )
 
     sup_train_loader = get_supervised_train_loader(
         cfg.dataflow.name,
@@ -55,7 +63,9 @@ def get_dataflow(cfg, cta=None, with_unsup=False):
     unsup_train_loader = None
     if with_unsup:
         if cta is None:
-            raise ValueError("If with_unsup=True, cta should be defined, but given None")
+            raise ValueError(
+                "If with_unsup=True, cta should be defined, but given None"
+            )
         unsup_train_loader = get_unsupervised_train_loader(
             cfg.dataflow.name,
             root=cfg.dataflow.data_path,
