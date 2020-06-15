@@ -52,10 +52,9 @@ For example, training on 2 GPUs
 python -u -m torch.distributed.launch --nproc_per_node=2 main_fixmatch.py model=WRN-28-2 distributed.backend=nccl
 ```
 
-### TPU(s) on Colab (Experimental)
-
-#### 8 TPUs on Colab
-
+### TPU(s) on Colab (Experimental) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1ZoWz1-a3bpj1xMxpM2K2qQ4Y9xvtdGWO)
+ 
+For example, training on 8 TPUs in distributed mode: 
 ```bash
 python -u main_fixmatch.py model=resnet18 distributed.backend=xla-tpu distributed.nproc_per_node=8
 # or python -u main_fixmatch.py model=WRN-28-2 distributed.backend=xla-tpu distributed.nproc_per_node=8

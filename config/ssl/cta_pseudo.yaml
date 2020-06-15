@@ -8,3 +8,4 @@ lambda_u: 1.0
 
 mu_ratio: 7
 
+cta_update_every: 1

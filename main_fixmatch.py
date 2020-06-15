@@ -152,7 +152,7 @@ def training(local_rank, cfg):
 
     distributed = idist.get_world_size() > 1
 
-    @trainer.on(Events.ITERATION_COMPLETED)
+    @trainer.on(Events.ITERATION_COMPLETED(every=cfg.ssl.cta_update_every))
     def update_cta_rates():
         batch = trainer.state.batch
         x, y = batch["cta_probe_batch"]["image"], batch["cta_probe_batch"]["target"]

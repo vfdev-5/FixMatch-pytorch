@@ -22,7 +22,7 @@ ema_decay: 0.999
 defaults:
   - dataflow: cifar10
   - solver: default
-  - ssl: pseudo
+  - ssl: cta_pseudo
 
 
 solver:
