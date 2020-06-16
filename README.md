@@ -7,6 +7,8 @@ and its official [code](https://github.com/google-research/fixmatch).
 
 **Data-augmentations policy is CTA**
 
+Online logging on W&B: https://app.wandb.ai/vfdev-5/fixmatch-pytorch
+
 ## Requirements
 
 ```bash
@@ -60,8 +62,6 @@ By default, we use Tensorboard to log training curves
 tensorboard --logdir=/tmp/output-fixmatch-cifar10/
 ```
 
-Online logging on W&B: https://app.wandb.ai/vfdev-5/fixmatch-pytorch
-
 
 ### Distributed Data Parallel (DDP) on multiple GPUs (Experimental)
 
@@ -84,10 +84,11 @@ python -u main_fixmatch.py model=resnet18 distributed.backend=xla-tpu distribute
 
 ### Faster Resnet-18 training
 
-- reduce the number of epochs
-- reduce the number of CTA
+- reduced the number of epochs
+- reduced the number of CTA updates
+- reduced EMA decay
 
 ```bash
-python main_fixmatch.py distributed.backend=nccl online_exp_tracking.wandb=true solver.num_epochs=100 \
-    ssl.confidence_threshold=0.7 ema_decay=0.9 ssl.cta_update_every=15
+python main_fixmatch.py distributed.backend=nccl online_exp_tracking.wandb=true solver.num_epochs=500 \
+    ssl.confidence_threshold=0.8 ema_decay=0.9 ssl.cta_update_every=15
 ``` 
