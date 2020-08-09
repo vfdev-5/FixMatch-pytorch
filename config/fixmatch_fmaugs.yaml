@@ -10,9 +10,6 @@ hydra:
 
 name: fixmatch-with-fmaugs
 
-# For oblation, set disable_fmaugs: True
-disable_fmaugs: False
-
 seed: 543
 debug: false
 

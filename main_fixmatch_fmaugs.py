@@ -25,9 +25,6 @@ def training(local_rank, cfg):
 
     model, ema_model, optimizer, sup_criterion, lr_scheduler = utils.initialize(cfg)
 
-    # If using FMAugs, we added 'fmaugs_enabled' attributed
-    assert hasattr(model, "fmaugs_enabled"), "No FMAugs added to the model"
-
     unsup_criterion = instantiate(cfg.solver.unsupervised_criterion)
 
     (
@@ -36,9 +33,6 @@ def training(local_rank, cfg):
         unsup_train_loader,
         _,
     ) = utils.get_dataflow(cfg, with_unsup=True)
-
-    # Enable FMAugs
-    model.fmaugs_enabled = not cfg.disable_fmaugs
 
     def train_step(engine, batch):
         model.train()

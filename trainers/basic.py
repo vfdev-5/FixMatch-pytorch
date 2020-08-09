@@ -217,9 +217,14 @@ def create_trainer(
             if not wb_dir.exists():
                 wb_dir.mkdir()
 
+            wb_name = "{}-{}".format(cfg.name, cfg.model)
+
+            if "fmaugs" in cfg.name:
+                wb_name += "-fmaugs-{}".format(cfg.ssl.fmaugs)
+
             _ = WandBLogger(
                 project="fixmatch-pytorch",
-                name=cfg.name,
+                name=wb_name,
                 config=cfg,
                 sync_tensorboard=True,
                 dir=wb_dir.as_posix(),

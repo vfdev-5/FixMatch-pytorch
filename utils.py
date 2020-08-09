@@ -46,13 +46,13 @@ def initialize(cfg):
         import fmaugs
         from pathlib import Path
 
-        model.fmaugs_enabled = False
-
         fmaugs_ops_path = Path(__file__).parent / "config" / "ssl" / "fmaugs" / cfg.ssl.fmaugs
         fmaugs_conf = load_module(fmaugs_ops_path)
 
         fmaugs_type = fmaugs_conf.fmaugs_type
         random_fmaugs = fmaugs_conf.ops
+
+        model.fmaugs_enabled = True
 
         def transform_feature_map(module, x):
             if module.training and model.fmaugs_enabled:
@@ -63,7 +63,13 @@ def initialize(cfg):
     model = idist.auto_model(model)
 
     if isinstance(model, nn.parallel.DataParallel):
-        ema_model = nn.parallel.DataParallel(ema_model)
+        ema_model = nn.parallel.DataParallel(ema_model)     
+
+    if hasattr(model, "module") and hasattr(model.module, "fmaugs_enabled"):
+        # DP or DDP => add fmaugs_enabled as a property
+        type(model).fmaugs_enabled = property(
+            fget=lambda self: self.module.fmaugs_enabled
+        )
 
     optimizer = instantiate(cfg.solver.optimizer, model.parameters())
     optimizer = idist.auto_optim(optimizer)

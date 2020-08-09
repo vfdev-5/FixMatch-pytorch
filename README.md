@@ -37,7 +37,7 @@ python -u main_fixmatch_fmaugs.py model=resnet18 online_exp_tracking.wandb=true 
 
 To disable FMAugs:
 ```bash
-python -u main_fixmatch_fmaugs.py model=resnet18 disable_fmaugs=True online_exp_tracking.wandb=true solver.num_epochs=500 ssl.confidence_threshold=0.8 ema_decay=0.9 
+python -u main_fixmatch_fmaugs.py model=resnet18 ssl.fmaugs=null online_exp_tracking.wandb=true solver.num_epochs=500 ssl.confidence_threshold=0.8 ema_decay=0.9 
 ```
 
 
