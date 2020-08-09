@@ -40,6 +40,18 @@ To disable FMAugs:
 python -u main_fixmatch_fmaugs.py model=resnet18 ssl.fmaugs=null online_exp_tracking.wandb=true solver.num_epochs=500 ssl.confidence_threshold=0.8 ema_decay=0.9 
 ```
 
+### Wide-Resnet Training 
+
+```bash
+python -u main_fixmatch_fmaugs.py model=WRN-28-2 online_exp_tracking.wandb=true solver.num_epochs=500 
+```
+
+To disable FMAugs:
+```bash
+python -u main_fixmatch_fmaugs.py model=WRN-28-2 disable_fmaugs=True online_exp_tracking.wandb=true solver.num_epochs=500 
+```
+
+
 
 
 ## Training with CTA
