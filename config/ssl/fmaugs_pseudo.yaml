@@ -1,0 +1,14 @@
+# @package _group_
+
+num_train_samples_per_class: 25
+
+confidence_threshold: 0.95
+
+lambda_u: 1.0
+
+mu_ratio: 7
+
+fmaugs_update_every: 1
+
+# FMAugs:
+fmaugs: "geom_and_values.py"

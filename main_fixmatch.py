@@ -10,7 +10,7 @@ from omegaconf import DictConfig
 
 import utils
 import trainers
-from ctaugment import get_default_cta, OPS, interleave, deinterleave
+from ctaugment import get_default_cta, OPS
 
 
 sorted_op_names = sorted(list(OPS.keys()))
@@ -91,9 +91,9 @@ def training(local_rank, cfg):
         # batches have the same distribution of labeled and unlabeled samples and will therefore have more consistent
         # moments.
         #
-        x_cat = interleave(torch.cat([x, weak_x, strong_x], dim=0), le)
+        x_cat = utils.interleave(torch.cat([x, weak_x, strong_x], dim=0), le)
         y_pred_cat = model(x_cat)
-        y_pred_cat = deinterleave(y_pred_cat, le)
+        y_pred_cat = utils.deinterleave(y_pred_cat, le)
 
         idx1 = len(x)
         idx2 = idx1 + len(weak_x)

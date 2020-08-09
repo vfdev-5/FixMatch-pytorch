@@ -63,7 +63,7 @@ def get_test_loader(dataset_name, root, download=True, **dataloader_kwargs):
 
 
 def get_unsupervised_train_loader(
-    dataset_name, root, cta, download=True, **dataloader_kwargs
+    dataset_name, root, cta=None, download=True, **dataloader_kwargs
 ):
     if dataset_name == "cifar10":
         from dataflow import cifar10
@@ -72,7 +72,10 @@ def get_unsupervised_train_loader(
             root, num_train_samples_per_class=None, download=download
         )
 
-        strong_transforms = partial(cifar10.cta_image_transforms, cta=cta)
+        if cta is not None:
+            strong_transforms = partial(cifar10.cta_image_transforms, cta=cta)
+        else:
+            strong_transforms = cifar10.random_strong_transforms
 
         return cifar10.get_unsupervised_train_loader(
             full_train_dataset,

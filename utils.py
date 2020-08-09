@@ -13,6 +13,27 @@ from dataflow import (
 )
 
 
+def load_module(filepath):
+    """Method to load module from file path
+
+    Args:
+        filepath: path to module to load
+    """
+    # Taken from https://github.com/vfdev-5/py_config_runner/blob/2d64af869cd89d4fd1f01da1465a913e160cf135/
+    # py_config_runner/utils.py#L60
+
+    import importlib.util
+    from pathlib import Path
+
+    if not Path(filepath).exists():
+        raise ValueError("File '{}' is not found".format(filepath))
+
+    spec = importlib.util.spec_from_file_location(Path(filepath).stem, filepath)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def initialize(cfg):
     model = setup_model(cfg.model, num_classes=cfg.num_classes)
     ema_model = setup_model(cfg.model, num_classes=cfg.num_classes)
@@ -20,6 +41,24 @@ def initialize(cfg):
     model.to(idist.device())
     ema_model.to(idist.device())
     setup_ema(ema_model, model)
+
+    if cfg.ssl.get("fmaugs", None) is not None:
+        import fmaugs
+        from pathlib import Path
+
+        model.fmaugs_enabled = False
+
+        fmaugs_ops_path = Path(__file__).parent / "config" / "ssl" / "fmaugs" / cfg.ssl.fmaugs
+        fmaugs_conf = load_module(fmaugs_ops_path)
+
+        fmaugs_type = fmaugs_conf.fmaugs_type
+        random_fmaugs = fmaugs_conf.ops
+
+        def transform_feature_map(module, x):
+            if module.training and model.fmaugs_enabled:
+                return random_fmaugs(x[0])
+
+        fmaugs.augment_model(fmaugs_type, model, transform_feature_map)
 
     model = idist.auto_model(model)
 
@@ -62,14 +101,10 @@ def get_dataflow(cfg, cta=None, with_unsup=False):
 
     unsup_train_loader = None
     if with_unsup:
-        if cta is None:
-            raise ValueError(
-                "If with_unsup=True, cta should be defined, but given None"
-            )
         unsup_train_loader = get_unsupervised_train_loader(
             cfg.dataflow.name,
             root=cfg.dataflow.data_path,
-            cta=cta,
+            cta=cta,  # cta can also be None -> random_strong_transforms is used instead of CTA
             batch_size=int(cfg.dataflow.batch_size * cfg.ssl.mu_ratio),
             num_workers=num_workers,
         )
@@ -86,3 +121,21 @@ def get_dataflow(cfg, cta=None, with_unsup=False):
         )
 
     return sup_train_loader, test_loader, unsup_train_loader, cta_probe_loader
+
+
+def interleave(x, batch, inverse=False):
+    """
+    TF code
+    def interleave(x, batch):
+        s = x.get_shape().as_list()
+        return tf.reshape(
+            tf.transpose(tf.reshape(x, [-1, batch] + s[1:]), [1, 0] + list(range(2, 1+len(s)))), [-1] + s[1:]
+        )
+    """
+    shape = x.shape
+    axes = [batch, -1] if inverse else [-1, batch]
+    return x.reshape(*axes, *shape[1:]).transpose(0, 1).reshape(-1, *shape[1:])
+
+
+def deinterleave(x, batch):
+    return interleave(x, batch, inverse=True)

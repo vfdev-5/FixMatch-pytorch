@@ -1,6 +1,6 @@
 hydra:
   run:
-    dir: /tmp/output-fixmatch-cifar10/fixmatch/${now:%Y%m%d-%H%M%S}
+    dir: /tmp/output-fixmatch-cifar10/fixmatch-fmaugs/${now:%Y%m%d-%H%M%S}
   job_logging:
     handlers:
       console:
@@ -8,7 +8,10 @@ hydra:
     root:
       level: WARN
 
-name: fixmatch
+name: fixmatch-with-fmaugs
+
+# For oblation, set disable_fmaugs: True
+disable_fmaugs: False
 
 seed: 543
 debug: false
@@ -22,7 +25,7 @@ ema_decay: 0.999
 defaults:
   - dataflow: cifar10
   - solver: default
-  - ssl: cta_pseudo
+  - ssl: fmaugs_pseudo
 
 
 solver:

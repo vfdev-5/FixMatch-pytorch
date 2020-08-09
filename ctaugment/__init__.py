@@ -44,19 +44,3 @@ def stats(cta):
         )
         for k in sorted(OPS.keys())
     )
-
-
-def interleave(x, batch, inverse=False):
-    """
-    TF code
-    def interleave(x, batch):
-        s = x.get_shape().as_list()
-        return tf.reshape(tf.transpose(tf.reshape(x, [-1, batch] + s[1:]), [1, 0] + list(range(2, 1+len(s)))), [-1] + s[1:])
-    """
-    shape = x.shape
-    axes = [batch, -1] if inverse else [-1, batch]
-    return x.reshape(*axes, *shape[1:]).transpose(0, 1).reshape(-1, *shape[1:])
-
-
-def deinterleave(x, batch):
-    return interleave(x, batch, inverse=True)

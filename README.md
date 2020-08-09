@@ -5,7 +5,7 @@ Experiments with "FixMatch" on Cifar10 dataset.
 Based on ["FixMatch: Simplifying Semi-Supervised Learning withConsistency and Confidence"](https://arxiv.org/abs/2001.07685)
 and its official [code](https://github.com/google-research/fixmatch).
 
-**Data-augmentations policy is CTA**
+**Data-augmentations policy is CTA or [FMAugs](https://github.com/vfdev-5/fmaugs-pytorch)**
 
 Online logging on W&B: https://app.wandb.ai/vfdev-5/fixmatch-pytorch
 
@@ -13,8 +13,7 @@ Online logging on W&B: https://app.wandb.ai/vfdev-5/fixmatch-pytorch
 
 ```bash
 pip install --upgrade --pre hydra-core tensorboardX
-pip install --upgrade git+https://github.com/pytorch/ignite
-# pip install --upgrade --pre pytorch-ignite
+pip install --upgrade --pre pytorch-ignite
 ```
 
 Optionally, we can install `wandb` for online experiments tracking.
@@ -22,12 +21,28 @@ Optionally, we can install `wandb` for online experiments tracking.
 pip install wandb
 ```
 
-We can also opt to replace `Pillow` by `Pillow-SIMD` to accelerate image processing part:
+We can also opt to replace `Pillow` by `Pillow-SIMD` to accelerate image processing part for CTA:
 ```bash
 pip uninstall -y pillow && CC="cc -mavx2" pip install --no-cache-dir --force-reinstall pillow-simd
 ```
 
-## Training
+## Training with FMAugs
+
+
+### Fast training with ResNet18
+
+```bash
+python -u main_fixmatch_fmaugs.py model=resnet18 online_exp_tracking.wandb=true solver.num_epochs=500 ssl.confidence_threshold=0.8 ema_decay=0.9 
+```
+
+To disable FMAugs:
+```bash
+python -u main_fixmatch_fmaugs.py model=resnet18 disable_fmaugs=True online_exp_tracking.wandb=true solver.num_epochs=500 ssl.confidence_threshold=0.8 ema_decay=0.9 
+```
+
+
+
+## Training with CTA
 
 ```bash
 python -u main_fixmatch.py model=WRN-28-2
